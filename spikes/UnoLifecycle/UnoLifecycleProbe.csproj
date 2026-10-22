@@ -8,5 +8,6 @@
     <ApplicationTitle>CSharpClipboard Uno Lifecycle Probe</ApplicationTitle>
     <ApplicationId>dev.dimonsmart.CSharpClipboard.UnoLifecycleProbe</ApplicationId>
     <PublishTrimmed>false</PublishTrimmed>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 </Project>
