@@ -263,8 +263,10 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
                 VerticalAlignment = VerticalAlignment.Center
             });
             var pinLabel = entry.PinnedAt is null ? "Pin" : "Unpin";
-            var pin = Button(pinLabel, () => PinAsync(entry));
+            var pin = new Button { Content = "📌" };
+            pin.Click += (_, args) => { args.Handled = true; _ = RunAsync(() => PinAsync(entry)); };
             AutomationProperties.SetName(pin, pinLabel);
+            ToolTipService.SetToolTip(pin, pinLabel);
             Grid.SetColumn(pin, 1);
             layout.Children.Add(pin);
             item.Content = layout;

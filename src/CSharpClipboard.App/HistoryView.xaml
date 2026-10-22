@@ -32,7 +32,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="KeyboardHintsInner" Grid.Column="0" FontSize="11" Opacity="0.75"
                            TextWrapping="Wrap" VerticalAlignment="Center" />
-                <Button x:Name="SettingsButtonInner" Grid.Column="1" Content="Settings"
+                <Button x:Name="SettingsButtonInner" Grid.Column="1" Content="⚙" ToolTipService.ToolTip="Settings"
                         AutomationProperties.Name="Settings" />
             </Grid>
         </StackPanel>

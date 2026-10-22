@@ -203,7 +203,7 @@ public interface IDesktopPlatformServices : IGlobalShortcutPort, IStartupRegistr
     bool IsValidApplicationIdentifier(string identifier);
 }
 
-// A platform-owned status item keeps platform click semantics out of the Avalonia tray backend.
+// A platform-owned status item keeps platform click semantics out of the desktop UI toolkit.
 // The shell owns the commands; the adapter owns native creation, lifetime and menu presentation.
 public enum StatusItemAction
 {
