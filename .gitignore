@@ -65,6 +65,9 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
+# Local IDD orchestration state and diagnostic history (not product specifications)
+/.idd/factory/
+
 # Tye
 .tye/
 

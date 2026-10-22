@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.BuildServices" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <ProjectReference Include="..\CSharpClipboard.Core\CSharpClipboard.Core.csproj" />
+    <ProjectReference Include="..\CSharpClipboard.Platform.MacOS\CSharpClipboard.Platform.MacOS.csproj" />
+    <ProjectReference Include="..\CSharpClipboard.Platform.Windows\CSharpClipboard.Platform.Windows.csproj" />
+    <ProjectReference Include="..\CSharpClipboard.Services\CSharpClipboard.Services.csproj" />
+    <ProjectReference Include="..\CSharpClipboard.Storage\CSharpClipboard.Storage.csproj" />
+  </ItemGroup>
+</Project>

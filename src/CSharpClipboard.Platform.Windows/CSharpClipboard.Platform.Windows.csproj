@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\CSharpClipboard.Core\CSharpClipboard.Core.csproj" />
+  </ItemGroup>
+</Project>

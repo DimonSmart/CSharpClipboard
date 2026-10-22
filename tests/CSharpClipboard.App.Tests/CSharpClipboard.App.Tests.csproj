@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Headless.XUnit" />
+    <PackageReference Include="Avalonia.BuildServices" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <ProjectReference Include="..\..\src\CSharpClipboard.App\CSharpClipboard.App.csproj" />
+    <ProjectReference Include="..\..\src\CSharpClipboard.Core\CSharpClipboard.Core.csproj" />
+    <ProjectReference Include="..\..\src\CSharpClipboard.Services\CSharpClipboard.Services.csproj" />
+  </ItemGroup>
+</Project>
