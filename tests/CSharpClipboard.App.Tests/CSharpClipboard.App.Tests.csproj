@@ -1,17 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia.Headless.XUnit" />
-    <PackageReference Include="Avalonia.BuildServices" ExcludeAssets="all" PrivateAssets="all" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
-    <PackageReference Include="xunit.runner.visualstudio">
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <ProjectReference Include="..\..\src\CSharpClipboard.App\CSharpClipboard.App.csproj" />
-    <ProjectReference Include="..\..\src\CSharpClipboard.Core\CSharpClipboard.Core.csproj" />
-    <ProjectReference Include="..\..\src\CSharpClipboard.Services\CSharpClipboard.Services.csproj" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <ProjectReference Include="../../src/CSharpClipboard.Core/CSharpClipboard.Core.csproj" />
+    <Compile Include="../../src/CSharpClipboard.App/SingleInstanceLease.cs" Link="SingleInstanceLease.cs" />
+    <Compile Include="../../src/CSharpClipboard.App/ReleaseChecker.cs" Link="ReleaseChecker.cs" />
   </ItemGroup>
 </Project>

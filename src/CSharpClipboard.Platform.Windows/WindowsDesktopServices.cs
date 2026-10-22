@@ -10,9 +10,10 @@ using Microsoft.Win32;
 namespace CSharpClipboard.Platform.Windows;
 
 [SupportedOSPlatform("windows")]
-public sealed class WindowsDesktopServices : IDesktopPlatformServices
+public sealed class WindowsDesktopServices : IDesktopPlatformServices, IStatusItemPlatform
 {
     private readonly WindowsClipboardPort _clipboard;
+    private WindowsTrayIcon? _tray;
     private int _hotkeyId;
     private GlobalShortcut? _shortcut;
     public WindowsDesktopServices(WindowsClipboardPort clipboard) : this(clipboard, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CSharpClipboard")) { }
@@ -80,7 +81,25 @@ public sealed class WindowsDesktopServices : IDesktopPlatformServices
     {
         await _clipboard.OnNativeThreadAsync(() => { if (_hotkeyId != 0) Native.UnregisterHotKey(_clipboard.NativeWindow, _hotkeyId); _hotkeyId = 0; _shortcut = null; }).ConfigureAwait(false);
     }
-    public void Dispose() { UnregisterAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult(); _clipboard.ShortcutPressed -= OnShortcut; }
+    public ValueTask CreateStatusItemAsync(Action<StatusItemAction> onAction, bool capturePaused, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        _tray ??= new WindowsTrayIcon(onAction, capturePaused);
+        return ValueTask.CompletedTask;
+    }
+    public ValueTask SetStatusItemCapturePausedAsync(bool capturePaused, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        _tray?.UpdateCaptureState(capturePaused);
+        return ValueTask.CompletedTask;
+    }
+    public ValueTask DiscardPendingStatusItemSnapshotAsync(CancellationToken token) => ValueTask.CompletedTask;
+    public void Dispose()
+    {
+        _tray?.Dispose();
+        UnregisterAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
+        _clipboard.ShortcutPressed -= OnShortcut;
+    }
     private static class Native
     {
         [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);

@@ -1,16 +1,23 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Uno.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-desktop</TargetFramework>
+    <UnoSingleProject>true</UnoSingleProject>
+    <UnoFeatures>SkiaRenderer</UnoFeatures>
+    <AssemblyName>CSharpClipboard.App</AssemblyName>
+    <ApplicationTitle>CSharpClipboard</ApplicationTitle>
+    <ApplicationId>dev.dimonsmart.CSharpClipboard</ApplicationId>
+    <ApplicationDisplayVersion>1.0.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <PublishTrimmed>false</PublishTrimmed>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UnoEnableDevServer>false</UnoEnableDevServer>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia" />
-    <PackageReference Include="Avalonia.BuildServices" ExcludeAssets="all" PrivateAssets="all" />
-    <PackageReference Include="Avalonia.Desktop" />
-    <PackageReference Include="Avalonia.Themes.Fluent" />
-    <ProjectReference Include="..\CSharpClipboard.Core\CSharpClipboard.Core.csproj" />
-    <ProjectReference Include="..\CSharpClipboard.Platform.MacOS\CSharpClipboard.Platform.MacOS.csproj" />
-    <ProjectReference Include="..\CSharpClipboard.Platform.Windows\CSharpClipboard.Platform.Windows.csproj" />
-    <ProjectReference Include="..\CSharpClipboard.Services\CSharpClipboard.Services.csproj" />
-    <ProjectReference Include="..\CSharpClipboard.Storage\CSharpClipboard.Storage.csproj" />
+    <ProjectReference Include="../CSharpClipboard.Core/CSharpClipboard.Core.csproj" />
+    <ProjectReference Include="../CSharpClipboard.Platform.MacOS/CSharpClipboard.Platform.MacOS.csproj" />
+    <ProjectReference Include="../CSharpClipboard.Platform.Windows/CSharpClipboard.Platform.Windows.csproj" />
+    <ProjectReference Include="../CSharpClipboard.Services/CSharpClipboard.Services.csproj" />
+    <ProjectReference Include="../CSharpClipboard.Storage/CSharpClipboard.Storage.csproj" />
   </ItemGroup>
 </Project>

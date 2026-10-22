@@ -1,6 +1,6 @@
 # CSharpClipboard
 
-Local plain-text clipboard history for Windows 11 x64 and macOS 26+ arm64, built with .NET 10, Avalonia and SQLite. Windows is implemented and tested here; native macOS compilation, permissions and Finder behavior require the macOS CI/device checks described in [Verification evidence](docs/VerificationEvidence.md).
+Local plain-text clipboard history for Windows 11 x64 and macOS 26+ arm64, built with .NET 10, Uno Platform + Skia Desktop and SQLite. The UI migration requires interactive Windows/macOS verification; build-only results are insufficient. See [Uno migration verification](docs/UnoMigrationLifecycleGate.md).
 
 Extract the Windows portable ZIP and run `CSharpClipboard.App.exe`. It starts in the notification area; Settings appears on first launch. No SDK is required by the packaged application.
 
@@ -21,7 +21,7 @@ About performs a user-initiated stable GitHub Release check and opens the releas
 ```powershell
 dotnet restore CSharpClipboard.sln
 dotnet test CSharpClipboard.sln -c Release
-dotnet run --project src/CSharpClipboard.App
+dotnet run --project src/CSharpClipboard.App -c Debug
 ./scripts/package-windows.ps1
 ```
 

@@ -17,7 +17,7 @@ public sealed class MacOSPasteSnapshot : IPasteTargetSnapshot
 
 // Dispatcher is supplied at composition: AppKit C ABI calls always run on the real main thread.
 // Timer callbacks only post work. UTF-8 JSON ownership ends at cc_free, before returning managed values.
-public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPasteTargetPort<MacOSPasteSnapshot>, IDesktopPlatformServices, IStatusItemPlatform
+public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPasteTargetPort<MacOSPasteSnapshot>, IDesktopPlatformServices, IStatusItemPlatform, IAsyncDisposable
 {
     private readonly Func<Action, Task> _dispatch;
     private readonly Timer _timer;
@@ -194,12 +194,20 @@ public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPas
         cancellationToken.ThrowIfCancellationRequested();
         await InvokeAsync("discardStatusSnapshot").ConfigureAwait(false);
     }
-    public void Dispose()
+    // Never synchronously wait for the main AppKit dispatcher from its own thread.
+    public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _statusItemAction = null;
         _timer.Dispose();
-        _dispatch(() => Call("dispose")).GetAwaiter().GetResult();
+        await _dispatch(() => Call("dispose")).ConfigureAwait(false);
+    }
+
+    public void Dispose()
+    {
+        // A synchronous fallback is permitted only off the AppKit main thread.
+        // Production composition always calls DisposeAsync.
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
     private static class Native
     {

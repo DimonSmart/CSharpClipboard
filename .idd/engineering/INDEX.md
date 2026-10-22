@@ -4,7 +4,7 @@ Next ID: ENG-0008
 
 | Rule | Applicability | Applies when | Summary |
 | --- | --- | --- | --- |
-| ENG-0001 | Always | Every implementation change | C# / .NET 10 и Avalonia; native API изолированы в платформенных адаптерах. |
+| ENG-0001 | Always | Every implementation change | C# / .NET 10 и Uno Skia Desktop; native API изолированы в платформенных адаптерах. |
 | ENG-0002 | Always | Every implementation change | Сохранять направления зависимостей и платформенно-независимые контракты. |
 | ENG-0003 | Conditional | Изменение persisted history | Низкоуровневый SQLite driver, точные UTF-8 BLOB и атомарное версионированное хранилище. |
 | ENG-0004 | Always | Every implementation change | Изолировать interop с явными ownership, lifetime и thread contracts. |
