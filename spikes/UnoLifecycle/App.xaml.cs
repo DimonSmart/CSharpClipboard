@@ -10,6 +10,7 @@ public sealed partial class App : Application
     private readonly string[] _options;
     private DispatcherQueue? _dispatcher;
     private Window? _window;
+    private bool _wasShown;
 
     internal App(string[] options)
     {
@@ -103,15 +104,21 @@ public sealed partial class App : Application
             {
                 ProbeLog.Write("Window.Closed fired.");
                 if (ReferenceEquals(_window, window))
+                {
                     _window = null;
+                    _wasShown = false;
+                }
             };
             window.AppWindow.Closing += (_, _) => ProbeLog.Write("AppWindow.Closing fired.");
             _window = window;
             ProbeLog.Write("Created first Uno Window instance.");
         }
 
+        if (OperatingSystem.IsWindows() && _wasShown)
+            NativeWindowVisibility.Show(_window);
         _window.Activate();
-        ProbeLog.Write("Window.Activate called.");
+        _wasShown = true;
+        ProbeLog.Write("Window activated (with native SW_SHOW on Windows reactivation).");
     }
 
     private void HideWindow()

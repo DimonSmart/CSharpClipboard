@@ -29,7 +29,13 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private readonly Action _quit;
     private readonly HistoryPresentation _presentation = new();
     private readonly SemaphoreSlim _toggle = new(1, 1);
-    private readonly WindowVisibilityTracker<Window> _visible = new(NativeWindowVisibility.Hide);
+    private readonly WindowVisibilityTracker<Window> _visible = new(
+        activate: window => window.Activate(),
+        showAfterHide: window =>
+        {
+            if (OperatingSystem.IsWindows()) NativeWindowVisibility.Show(window);
+        },
+        hide: NativeWindowVisibility.Hide);
     private readonly List<Window> _windows = [];
     private readonly HashSet<Guid> _pinsInProgress = [];
     private readonly SingleInstanceLease _instance;
@@ -233,7 +239,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         return window;
     }
 
-    private void ShowWindow(Window window) { _visible.MarkVisible(window); window.Activate(); }
+    private void ShowWindow(Window window) => _visible.Show(window);
     private void HideWindow(Window window) => _visible.Hide(window);
     private bool IsShown(Window? window) => _visible.IsVisible(window);
 

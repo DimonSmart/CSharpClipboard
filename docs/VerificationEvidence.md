@@ -32,3 +32,11 @@ IDD-0003 / IDD-0004: History loads rows at opening with no periodic refresh. Sea
 The Windows native hide code now resolves the real HWND from Uno's native Win32 window peer, instead of passing `WindowNative.GetWindowHandle` (an Uno AppWindow ID) to Win32. The lifecycle spike uses the same correct lookup. Window visibility is marked hidden only after a successful native hide; failures keep the logical state visible, allowing a retry. Reentrant deactivation cannot start a second native hide. Pin/unpin ignores overlapping actions on one entry and pending refreshes are replayed after an in-progress refresh.
 
 Noninteractive regression coverage: `WindowVisibilityTests` exercises successful/failing/reentrant hide state transitions and extraction of `Hwnd` (excluding ID-only peers). **Interactive Windows 11 behavior remains not verified**; check History close-button hide/reopen, Pin/Unpin button and keyboard shortcuts, Settings/About/Preview closing, and tray/clipboard continuity on actual Windows before closing the lifecycle release gate.
+
+## History window cannot reopen after native hide (2026-10-22)
+
+User-reported interactive Windows regression: after opening History from the tray and closing it with the title-bar X, a subsequent tray click does not show the History window. Root cause: on Win32 Uno, `Window.Activate()` only invokes `SetActiveWindow` after the first show. Uno's `ShowCore()` runs only once, so it does not undo a native `SW_HIDE`.
+
+The application now calls Win32 `SW_SHOW` using the actual Uno native HWND before `Window.Activate()` **only for previously shown and hidden Windows windows**. First activation still uses Uno's normal initialization and render path. The visibility tracker covers reopen ordering, repeated show, hide failures, show failures, and reentrancy. The isolated lifecycle spike now exercises explicit SW_SHOW on Win32 reopen as well.
+
+Automated tests are noninteractive and do not prove native desktop acceptance. **Real Windows 11 acceptance remains not verified**: open via tray, close with X, reopen via tray 20 times; repeat with Escape, click outside and global shortcut; confirm Settings/About/Preview also reopen, focus behaves normally, clipboard capture continues, and Quit truly exits. Mark acceptance only after collecting this evidence.

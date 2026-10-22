@@ -8,6 +8,20 @@ namespace CSharpClipboard.UnoLifecycleProbe;
 // These native calls are deliberately isolated to the lifecycle experiment.
 internal static partial class NativeWindowVisibility
 {
+    internal static void Show(Window window)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        var native = Uno.UI.Xaml.WindowHelper.GetNativeWindow(window);
+        var property = native?.GetType().GetProperty("Hwnd", BindingFlags.Public | BindingFlags.Instance);
+        if (property?.GetValue(native) is not IntPtr handle || handle == IntPtr.Zero || !IsWindow(handle))
+            throw new InvalidOperationException("Win32 Uno window has no valid native HWND.");
+        _ = ShowWindow(handle, 5); // SW_SHOW.
+        if (!IsWindowVisible(handle))
+            throw new InvalidOperationException("Win32 window remains hidden after SW_SHOW.");
+        _ = SetForegroundWindow(handle);
+        ProbeLog.Write($"Win32 ShowWindow(SW_SHOW) called: hwnd=0x{handle.ToInt64():X}");
+    }
+
     internal static void Hide(Window window)
     {
         if (OperatingSystem.IsWindows())
@@ -45,6 +59,10 @@ internal static partial class NativeWindowVisibility
             throw new PlatformNotSupportedException();
         }
     }
+
+    [LibraryImport("user32.dll", EntryPoint = "SetForegroundWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(IntPtr hwnd);
 
     [LibraryImport("user32.dll", EntryPoint = "ShowWindow")]
     [return: MarshalAs(UnmanagedType.Bool)]

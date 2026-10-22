@@ -8,15 +8,25 @@ namespace CSharpClipboard.App;
 // The native hide must run on the Uno UI thread and does not close the Uno host.
 internal static partial class NativeWindowVisibility
 {
+    // Uno calls ShowCore only on the first Window.Activate(). Subsequent Activate()
+    // calls do not restore a window hidden directly with Win32 SW_HIDE.
+    internal static void Show(Window window)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        var hwnd = GetWindowsHandle(window);
+        _ = ShowWindow(hwnd, 5); // SW_SHOW; BOOL reports previous visibility, not success.
+        if (!IsWindowVisible(hwnd))
+            throw new InvalidOperationException("Could not show the native Win32 window.");
+        // The tray click is a user gesture; foreground permission is OS-controlled.
+        _ = SetForegroundWindow(hwnd);
+    }
+
     internal static void Hide(Window window)
     {
         if (OperatingSystem.IsWindows())
         {
-            // Uno's WindowNative.GetWindowHandle returns an AppWindow ID, not a Win32 HWND.
-            var native = Uno.UI.Xaml.WindowHelper.GetNativeWindow(window);
-            var hwnd = UnoWin32WindowHandle.Resolve(native);
-            if (!IsWindow(hwnd)) throw new InvalidOperationException("Uno returned an invalid Win32 HWND.");
-            _ = ShowWindow(hwnd, 0); // The return value is the PREVIOUS visibility, not success.
+            var hwnd = GetWindowsHandle(window);
+            _ = ShowWindow(hwnd, 0); // SW_HIDE; BOOL reports previous visibility, not success.
             if (IsWindowVisible(hwnd))
                 throw new InvalidOperationException("Could not hide the native Win32 window.");
         }
@@ -31,6 +41,18 @@ internal static partial class NativeWindowVisibility
             ObjcMsgSend(handle, SelRegisterName("orderOut:"), IntPtr.Zero);
         }
     }
+
+    private static IntPtr GetWindowsHandle(Window window)
+    {
+        // Uno's WindowNative.GetWindowHandle returns an AppWindow ID, not a Win32 HWND.
+        var hwnd = UnoWin32WindowHandle.Resolve(Uno.UI.Xaml.WindowHelper.GetNativeWindow(window));
+        if (!IsWindow(hwnd)) throw new InvalidOperationException("Uno returned an invalid Win32 HWND.");
+        return hwnd;
+    }
+
+    [LibraryImport("user32.dll", EntryPoint = "SetForegroundWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(IntPtr hwnd);
 
     [LibraryImport("user32.dll", EntryPoint = "ShowWindow")]
     [return: MarshalAs(UnmanagedType.Bool)]
