@@ -11,7 +11,8 @@
     <ApplicationVersion>1</ApplicationVersion>
     <PublishTrimmed>false</PublishTrimmed>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <UnoEnableDevServer>false</UnoEnableDevServer>
+    <!-- Uno.Sdk 6.7.30 currently resolves DevServer transitively; optimized builds are rejected by UNOB0019. -->
+    <Optimize>false</Optimize>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CSharpClipboard.Core/CSharpClipboard.Core.csproj" />
