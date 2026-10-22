@@ -40,7 +40,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private Window? _panel, _settingsWindow, _preview, _feedback;
     private readonly ListBox _list = new();
     private readonly TextBox _search = new() { Watermark = "Search history…" };
-    private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+    private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.65 };
     private readonly TextBlock _empty = new() { Text = "Copy text to start your history", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private int _searchVersion;
     private bool _refreshing, _closing;
@@ -139,21 +139,31 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         if (_panel is not null) return;
         _panel = new Window { Title = "Clipboard History", Width = 640, Height = 500, MinWidth = 320, MinHeight = 260,
             ShowInTaskbar = false, Icon = AppIcon.Create() };
-        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Margin = new Thickness(16), RowSpacing = 10 };
-        root.Children.Add(new TextBlock { Text = "Clipboard History", FontSize = 22, FontWeight = FontWeight.SemiBold });
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Margin = new Thickness(16), RowSpacing = 10 };
         var searchRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
         AutomationProperties.SetName(_search, "Search history");
         searchRow.Children.Add(_search);
         var clear = Button("Clear", async () => { await Task.Run(async () => await _history!.ClearRecentAsync(default)); await Task.Run(() => _maintenance!.MaintainAsync()); await RefreshAsync(); }); Grid.SetColumn(clear, 1); searchRow.Children.Add(clear);
-        Grid.SetRow(searchRow, 1); root.Children.Add(searchRow);
-        var items = new Grid(); items.Children.Add(_list); items.Children.Add(_empty); Grid.SetRow(items, 2); root.Children.Add(items);
+        Grid.SetRow(searchRow, 0); root.Children.Add(searchRow);
+        var items = new Grid(); items.Children.Add(_list); items.Children.Add(_empty); Grid.SetRow(items, 1); root.Children.Add(items);
         AutomationProperties.SetName(_list, "Clipboard history entries");
         _list.ItemTemplate = new FuncDataTemplate<HistoryEntry>((entry, _) => entry is null ? new Border() : CreateRow(entry));
-        var footer = new StackPanel { Spacing = 6 };
+        var footer = new StackPanel { Spacing = 2 };
         footer.Children.Add(_status);
-        footer.Children.Add(new TextBlock { Text = $"Enter Paste · {Modifier}+Enter Copy · {Modifier}+P Pin · {Modifier}+Y Preview · Escape Close", FontSize = 11, TextWrapping = TextWrapping.Wrap });
-        footer.Children.Add(Button("Settings…", () => { ShowSettings(); return Task.CompletedTask; }));
-        Grid.SetRow(footer, 3); root.Children.Add(footer); _panel.Content = root;
+        var footerActions = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
+        footerActions.Children.Add(new TextBlock { Text = $"Enter Paste · {Modifier}+Enter Copy · {Modifier}+P Pin · {Modifier}+Y Preview · Escape Close", FontSize = 11, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.65 });
+        var settings = Button("⚙", () => { ShowSettings(); return Task.CompletedTask; });
+        settings.FontSize = 18;
+        settings.Padding = new Thickness(8, 4);
+        settings.MinWidth = 32;
+        settings.MinHeight = 32;
+        AutomationProperties.SetName(settings, "Settings");
+        ToolTip.SetTip(settings, "Settings");
+        settings.HorizontalAlignment = HorizontalAlignment.Right;
+        Grid.SetColumn(settings, 1);
+        footerActions.Children.Add(settings);
+        footer.Children.Add(footerActions);
+        Grid.SetRow(footer, 2); root.Children.Add(footer); _panel.Content = root;
         _panel.Closing += (_, e) => { if (!_closing) { e.Cancel = true; _ = RunAsync(CloseHistoryAsync); } };
         _panel.Deactivated += (_, _) => { if (_preview?.IsVisible != true && !_contextMenuOpen) _ = RunAsync(CloseHistoryAsync); };
         _panel.AddHandler(InputElement.KeyDownEvent, PanelKeyDown, RoutingStrategies.Tunnel);
@@ -171,7 +181,16 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         var text = new TextBlock { Text = preview, TextWrapping = TextWrapping.Wrap, MaxHeight = 64, VerticalAlignment = VerticalAlignment.Center };
         text.PointerReleased += (_, e) => { if (e.InitialPressMouseButton == MouseButton.Left) { e.Handled = true; _ = RunAsync(() => SelectAsync(entry, false)); } };
         grid.Children.Add(text);
-        var pin = Button(entry.PinnedAt is null ? "Pin" : "Unpin", () => PinAsync(entry));
+        var pinAction = entry.PinnedAt is null ? "Pin" : "Unpin";
+        var pin = Button(pinAction, () => PinAsync(entry));
+        pin.Content = new PathIcon
+        {
+            Data = StreamGeometry.Parse("M16 9V4h1V2H7v2h1v5l-2 2v2h5v9h2v-9h5v-2l-2-2z"),
+            Width = 16,
+            Height = 16
+        };
+        AutomationProperties.SetName(pin, pinAction);
+        ToolTip.SetTip(pin, pinAction);
         Grid.SetColumn(pin, 1); grid.Children.Add(pin);
         var border = new Border { Child = grid, Padding = new Thickness(10), BorderThickness = new Thickness(1), BorderBrush = Brushes.Gray, CornerRadius = new CornerRadius(5), Margin = new Thickness(0, 2) };
         var menu = new ContextMenu();
