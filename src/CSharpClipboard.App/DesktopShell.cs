@@ -342,8 +342,14 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         if (_view is null) return;
         var view = _view;
         view.FeedbackLabel.Text = message;
+        view.FeedbackLabel.Visibility = Visibility.Visible;
         await Task.Delay(3000);
-        Post(() => { if (ReferenceEquals(_view, view)) view.FeedbackLabel.Text = ""; });
+        Post(() =>
+        {
+            if (!ReferenceEquals(_view, view)) return;
+            view.FeedbackLabel.Text = "";
+            view.FeedbackLabel.Visibility = Visibility.Collapsed;
+        });
     }
 
     private async Task PinAsync(HistoryEntry entry)
