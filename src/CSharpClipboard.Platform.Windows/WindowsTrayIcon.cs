@@ -25,6 +25,8 @@ internal sealed class WindowsTrayIcon : IDisposable
     private IntPtr _hwnd;
     private ushort _atom;
     private Exception? _error;
+    private IntPtr _icon;
+    private bool _ownsIcon;
     private int _disposed;
     private volatile bool _paused;
 
@@ -64,6 +66,8 @@ internal sealed class WindowsTrayIcon : IDisposable
             _hwnd = CreateWindowEx(0x80, _className, _className, 0x80000000, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);
             if (_hwnd == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
             lock (InstancesGate) Instances[_hwnd] = this;
+            _icon = CreateClipboardIcon();
+            _ownsIcon = _icon != IntPtr.Zero;
             AddIcon();
             _ready.Set();
             while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
@@ -83,8 +87,40 @@ internal sealed class WindowsTrayIcon : IDisposable
                 _hwnd = IntPtr.Zero;
             }
             if (_atom != 0) UnregisterClass(_className, GetModuleHandle(null));
+            if (_ownsIcon) DestroyIcon(_icon);
             _ready.Set();
         }
+    }
+
+    // Reuse the 32x32 blue clipboard document icon previously used by the desktop app.
+    // CreateIconFromResourceEx consumes a DIB resource (without the ICO directory header).
+    private static IntPtr CreateClipboardIcon()
+    {
+        using var bytes = new MemoryStream();
+        using (var writer = new BinaryWriter(bytes, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(40); // BITMAPINFOHEADER
+            writer.Write(32);
+            writer.Write(64); // XOR bitmap + 1-bit AND mask
+            writer.Write((ushort)1);
+            writer.Write((ushort)32);
+            writer.Write(0);
+            writer.Write(4096);
+            writer.Write(0);
+            writer.Write(0);
+            writer.Write(0);
+            writer.Write(0);
+            for (var y = 0; y < 32; y++)
+                for (var x = 0; x < 32; x++)
+                {
+                    var page = x is >= 8 and <= 23 && y is >= 5 and <= 25;
+                    var line = page && x is >= 11 and <= 20 && (y == 10 || y == 15 || y == 20);
+                    writer.Write(line ? 0xFF2354BAu : page ? 0xFFF3F6FFu : 0xFF2354BAu);
+                }
+            writer.Write(new byte[128]);
+        }
+        var image = bytes.ToArray();
+        return CreateIconFromResourceEx(image, (uint)image.Length, true, 0x00030000, 32, 32, 0);
     }
 
     private NotifyIconData Icon()
@@ -96,7 +132,7 @@ internal sealed class WindowsTrayIcon : IDisposable
             Id = 1,
             Flags = 0x1 | 0x2 | 0x4,
             CallbackMessage = TrayCallback,
-            Icon = LoadIcon(IntPtr.Zero, new IntPtr(32512)),
+            Icon = _ownsIcon ? _icon : LoadIcon(IntPtr.Zero, new IntPtr(32512)),
             Tip = _paused ? "CSharpClipboard — Capture paused" : "CSharpClipboard — Capture active",
             Info = "",
             InfoTitle = ""
@@ -228,6 +264,8 @@ internal sealed class WindowsTrayIcon : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool AppendMenu(IntPtr menu, uint flags, uint id, string? label);
     [DllImport("user32.dll")] private static extern uint TrackPopupMenu(IntPtr menu, uint flags, int x, int y, int reserve, IntPtr hwnd, IntPtr rect);
     [DllImport("user32.dll")] private static extern bool DestroyMenu(IntPtr menu);
+    [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr icon);
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr CreateIconFromResourceEx(byte[] bits, uint size, [MarshalAs(UnmanagedType.Bool)] bool icon, uint version, int width, int height, uint flags);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool Shell_NotifyIcon(uint message, ref NotifyIconData data);
 }
