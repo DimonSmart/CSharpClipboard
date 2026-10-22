@@ -13,11 +13,28 @@ public sealed class PasteServiceTests
         fixture.Port.NextSnapshot = new Snapshot();
         Assert.Equal(HistorySelectionOutcome.ShortcutSent,
             await fixture.Service.SelectAsync(session, "chosen", HistorySelectionAction.Paste));
-        Assert.Equal(new[] { "snapshot", "show", "hide", "write", "restore", "dispatch", "dispose" }, fixture.Port.Calls);
+        Assert.Equal(new[] { "snapshot", "show", "restore", "hide", "write", "restore", "dispatch", "dispose" }, fixture.Port.Calls);
         Assert.Same(fixture.Port.Restored, fixture.Port.Dispatched);
         Assert.Equal(1, fixture.Port.Shortcuts);
         await session.DisposeAsync();
         Assert.Equal(1, fixture.Port.Dispatched!.Disposals);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Paste_hands_focus_back_before_hide_and_rechecks_after_clipboard_write(bool changeTargetDuringWrite)
+    {
+        await using var fixture = new Fixture();
+        fixture.Port.LoseTargetOnHideWithoutRestore = true;
+        if (changeTargetDuringWrite) fixture.Port.AfterCommit = () => fixture.Port.Refusal = "changed application";
+        var session = await fixture.Service.OpenHistoryAsync();
+
+        Assert.Equal(changeTargetDuringWrite ? HistorySelectionOutcome.CopiedOnly : HistorySelectionOutcome.ShortcutSent,
+            await fixture.Service.SelectAsync(session, "chosen", HistorySelectionAction.Paste));
+        Assert.Equal(changeTargetDuringWrite ? 0 : 1, fixture.Port.Shortcuts);
+        Assert.Equal("chosen", fixture.Port.Text);
+        Assert.Equal(1, fixture.Port.Writes);
     }
 
     [Theory]
@@ -51,6 +68,7 @@ public sealed class PasteServiceTests
             await fixture.Service.SelectAsync(session, "chosen", HistorySelectionAction.Paste));
         Assert.Equal(0, fixture.Port.Shortcuts);
         Assert.Null(fixture.Port.Dispatched);
+        Assert.Equal(1, fixture.Port.Calls.Count(call => call == "restore"));
     }
 
     [Theory]
@@ -360,6 +378,7 @@ public sealed class PasteServiceTests
         public List<string> Calls = [];
         public string? Failure, Refusal;
         public bool FinalTargetAvailable = true, ExternalOnWrite, ExternalAtDispatch, ReadForbidden;
+        public bool LoseTargetOnHideWithoutRestore;
         public int Writes, Reads, Shortcuts, MaximumWrites;
         public TaskCompletionSource WriteStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource? WriteGate;
@@ -376,7 +395,12 @@ public sealed class PasteServiceTests
             return ValueTask.FromResult(NextSnapshot);
         }
         public ValueTask ShowAsync(Guid invocationId, CancellationToken cancellationToken) { Call("show"); return ValueTask.CompletedTask; }
-        public ValueTask HideAsync(Guid invocationId, CancellationToken cancellationToken) { Call("hide"); return ValueTask.CompletedTask; }
+        public ValueTask HideAsync(Guid invocationId, CancellationToken cancellationToken)
+        {
+            Call("hide");
+            if (LoseTargetOnHideWithoutRestore && Restored is null) Refusal = "unrelated window activated by hide";
+            return ValueTask.CompletedTask;
+        }
         public ValueTask<bool> TryRestoreAsync(Snapshot snapshot, CancellationToken cancellationToken)
         { Call("restore"); Restored = snapshot; return ValueTask.FromResult(Refusal is null); }
         public ValueTask<PasteDispatchResult> TryDispatchAsync(Snapshot snapshot, ClipboardRevision expectedRevision, CancellationToken cancellationToken)

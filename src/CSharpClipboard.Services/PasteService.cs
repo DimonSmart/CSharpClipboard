@@ -72,10 +72,16 @@ public sealed class PasteService<TSnapshot>(IPasteTargetPort<TSnapshot> targets,
         {
             await _operations.WaitAsync(cancellationToken).ConfigureAwait(false);
             entered = true;
+            // Hand focus back while History still owns activation. Hiding the
+            // foreground panel first lets Windows activate an unrelated window,
+            // invalidating the original target before we can restore it.
+            var restoredBeforeHide = action == HistorySelectionAction.Paste &&
+                invocation.Snapshot is { } originalTarget &&
+                await targets.TryRestoreAsync(originalTarget, cancellationToken).ConfigureAwait(false);
             await panel.HideAsync(invocation.Id, cancellationToken).ConfigureAwait(false);
             var revision = await writes.WriteTextAsync(writer, text, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            if (action == HistorySelectionAction.Paste && invocation.Snapshot is { } snapshot &&
+            if (restoredBeforeHide && invocation.Snapshot is { } snapshot &&
                 await targets.TryRestoreAsync(snapshot, cancellationToken).ConfigureAwait(false))
             {
                 outcome = await targets.TryDispatchAsync(snapshot, revision, cancellationToken).ConfigureAwait(false) switch
