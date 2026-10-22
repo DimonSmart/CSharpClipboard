@@ -22,7 +22,7 @@
 | A12 | Повторный copy exact text | Одна запись, copiedAt изменён | IDD-0003 | not verified | — |
 | A13 | Copy variants: CRLF, trailing space, emoji, NUL | Отличия сохранены точно | IDD-0002, IDD-0003 | not verified | — |
 | A14 | Pin; 2000+ новых записей; Clear Recent; restart | Pin остался, recent очищены | IDD-0003 | not verified | — |
-| A15 | History открыта; pin/recopy/new items | Нет прыжков существующих строк; новые append; reopen пересортировывает | IDD-0003, IDD-0004 | not verified | — |
+| A15 | History открыта; pin/recopy/new items | Нет прыжков существующих строк; новые копирования не меняют список и поиск; reopen загружает актуальные записи и пересортировывает | IDD-0003, IDD-0004 | not verified | — |
 | A16 | Windows Clipboard update + отсутствие общего hook | Event listener работает без глобального keylogger | IDD-0002, IDD-0010 | not verified | — |
 | A17 | Windows elevated target | Copy Only без elevation | IDD-0005, IDD-0010 | not verified | — |
 | A18 | US + Russian + Dvorak на Mac | Реальный Cmd+V работает или корректный fallback | IDD-0005, IDD-0009 | not verified | — |

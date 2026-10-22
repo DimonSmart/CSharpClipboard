@@ -31,9 +31,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private readonly SemaphoreSlim _toggle = new(1, 1);
     private readonly HashSet<Window> _visible = [];
     private readonly List<Window> _windows = [];
-    private readonly CancellationTokenSource _stop = new();
     private readonly SingleInstanceLease _instance;
-    private Task? _refreshLoop;
     private IHistoryRepository? _history;
     private IHistoryMaintenance? _maintenance;
     private ClipboardCaptureCoordinator? _capture;
@@ -99,7 +97,6 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
             _preferences = _preferences with { Onboarded = true };
             await SaveAsync();
         }
-        _refreshLoop = RefreshLoopAsync(_stop.Token);
     }
 
     private string DatabasePath => Path.Combine(_platform.DataDirectory, "history.sqlite");
@@ -144,6 +141,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
                 _invocation = null;
             }
             _invocation = await _paste!.OpenHistoryAsync();
+            await UpdateCaptureStatusAsync();
         }
         finally { _toggle.Release(); }
     }
@@ -376,17 +374,6 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         return Task.CompletedTask;
     }
 
-    private async Task RefreshLoopAsync(CancellationToken token)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        try
-        {
-            while (await timer.WaitForNextTickAsync(token))
-                Post(() => _ = RunAsync(RefreshAsync));
-        }
-        catch (OperationCanceledException) { }
-    }
-
     private async Task RefreshAsync()
     {
         if (_refreshing || _history is null || _closing) return;
@@ -399,13 +386,17 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
                 _presentation.Refresh(entries);
                 await UpdateRowsAsync();
             }
-            var access = await _platform.GetClipboardAccessAsync(default);
-            if (_view is { } view && string.IsNullOrEmpty(view.StatusLabel.Text))
-                view.StatusLabel.Text = _preferences.CapturePaused ? "Capture paused"
-                    : access == PermissionStatus.Allowed ? "Capture active · Copy Only available · Paste checks original field"
-                    : "Clipboard Access Required · Copy Only available";
         }
         finally { _refreshing = false; }
+    }
+
+    private async Task UpdateCaptureStatusAsync()
+    {
+        var access = await _platform.GetClipboardAccessAsync(default);
+        if (_view is { } view && string.IsNullOrEmpty(view.StatusLabel.Text))
+            view.StatusLabel.Text = _preferences.CapturePaused ? "Capture paused"
+            : access == PermissionStatus.Allowed ? "Capture active · Copy Only available · Paste checks original field"
+            : "Clipboard Access Required · Copy Only available";
     }
 
     private async Task TogglePauseAsync()
@@ -666,14 +657,8 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _closing = true;
-        _stop.Cancel();
         _instance.Activated -= RequestHistory;
         _platform.HistoryRequested -= RequestHistory;
-        if (_refreshLoop is not null)
-        {
-            try { await _refreshLoop; }
-            catch (OperationCanceledException) { }
-        }
         if (_invocation is not null) await _invocation.DisposeAsync();
         try { if (_capture is not null) await _capture.DisposeAsync(); }
         finally
@@ -690,7 +675,6 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
                 if (_history is IAsyncDisposable h) await h.DisposeAsync();
                 foreach (var window in _windows) window.Close();
                 _visible.Clear();
-                _stop.Dispose();
                 _toggle.Dispose();
             }
         }

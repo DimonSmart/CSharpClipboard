@@ -22,3 +22,7 @@ This file reflects the **current Uno UI implementation**, not the pre-migration 
 5. The macOS ad-hoc signature is for development. Production Developer ID signing, notarization, TCC and login registration continuity are not certified.
 
 Do not claim migration acceptance criteria or safe public release as verified until the platform-specific tests have been executed and recorded. The [acceptance matrix](Acceptance.md) and [lifecycle matrix](UnoMigrationLifecycleGate.md) remain release gates.
+
+## History opening snapshot
+
+IDD-0003 / IDD-0004: History loads rows at opening with no periodic refresh. Search uses the snapshot. Explicit pin/delete/clear updates existing entries without importing new ones. Regression: HistoryPresentationTests.Open_snapshot_excludes_new_entries_until_reopening_and_reflects_explicit_changes (Windows: passed, Services 42/42). Interactive Windows/macOS A15: not verified.
