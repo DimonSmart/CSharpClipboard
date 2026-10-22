@@ -1,11 +1,13 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using CSharpClipboard.Core;
 
 namespace CSharpClipboard.Platform.Windows;
 
 // A real Win32 notification-area item. Independent from Uno and from the
 // clipboard listener's message-only window. Explorer restart recreates its icon.
+[SupportedOSPlatform("windows")]
 internal sealed class WindowsTrayIcon : IDisposable
 {
     private const uint TrayCallback = 0x8002;
@@ -214,7 +216,7 @@ internal sealed class WindowsTrayIcon : IDisposable
     [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern IntPtr DefWindowProc(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
     [DllImport("user32.dll")] private static extern uint RegisterWindowMessage(string text);
-    [DllImport("user32.dll")] private static extern bool GetMessage(out Msg msg, IntPtr hwnd, uint min, uint max);
+    [DllImport("user32.dll")] private static extern int GetMessage(out Msg msg, IntPtr hwnd, uint min, uint max);
     [DllImport("user32.dll")] private static extern bool TranslateMessage(ref Msg msg);
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref Msg msg);
     [DllImport("user32.dll")] private static extern void PostQuitMessage(int code);
