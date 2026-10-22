@@ -205,7 +205,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         _panel.Activated += (_, args) =>
         {
             // Deactivation may be caused by an intentional context menu or preview.
-            if (args.WindowActivationState == WindowActivationState.Deactivated &&
+            if (args.WindowActivationState == CoreWindowActivationState.Deactivated &&
                 !_contextMenuOpen && !IsShown(_preview) && !_closing && IsShown(_panel))
                 _ = RunAsync(CloseHistoryAsync);
         };

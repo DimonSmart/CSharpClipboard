@@ -13,26 +13,26 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBox x:Name="SearchBox" PlaceholderText="Search history…" AutomationProperties.Name="Search history" />
-            <Button x:Name="ClearButton" Grid.Column="1" Content="Clear" />
+            <TextBox x:Name="SearchBoxInner" PlaceholderText="Search history…" AutomationProperties.Name="Search history" />
+            <Button x:Name="ClearButtonInner" Grid.Column="1" Content="Clear" />
         </Grid>
         <Grid Grid.Row="1">
-            <ListView x:Name="HistoryList" SelectionMode="Single" IsItemClickEnabled="True"
+            <ListView x:Name="HistoryListInner" SelectionMode="Single" IsItemClickEnabled="True"
                       AutomationProperties.Name="Clipboard history entries" />
-            <TextBlock x:Name="EmptyMessage" Text="Copy text to start your history"
+            <TextBlock x:Name="EmptyMessageInner" Text="Copy text to start your history"
                        HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Grid>
         <StackPanel Grid.Row="2" Spacing="6">
-            <TextBlock x:Name="StatusLabel" FontSize="12" TextWrapping="Wrap" Opacity="0.75"/>
-            <TextBlock x:Name="FeedbackLabel" FontSize="12" TextWrapping="Wrap" />
+            <TextBlock x:Name="StatusLabelInner" FontSize="12" TextWrapping="Wrap" Opacity="0.75"/>
+            <TextBlock x:Name="FeedbackLabelInner" FontSize="12" TextWrapping="Wrap" />
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="KeyboardHints" Grid.Column="0" FontSize="11" Opacity="0.75"
+                <TextBlock x:Name="KeyboardHintsInner" Grid.Column="0" FontSize="11" Opacity="0.75"
                            TextWrapping="Wrap" VerticalAlignment="Center" />
-                <Button x:Name="SettingsButton" Grid.Column="1" Content="Settings"
+                <Button x:Name="SettingsButtonInner" Grid.Column="1" Content="Settings"
                         AutomationProperties.Name="Settings" />
             </Grid>
         </StackPanel>
