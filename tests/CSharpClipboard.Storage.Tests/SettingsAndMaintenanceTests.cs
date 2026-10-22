@@ -1,5 +1,6 @@
 using CSharpClipboard.Core;
 using CSharpClipboard.Storage;
+using Microsoft.Data.Sqlite;
 
 namespace CSharpClipboard.Storage.Tests;
 
@@ -33,15 +34,28 @@ public sealed class SettingsAndMaintenanceTests
         Directory.CreateDirectory(directory); var path = Path.Combine(directory, "history.sqlite");
         try
         {
-            await using var repository = await SqliteHistoryRepository.OpenAsync(path);
-            for (var index = 0; index < 65; index++) await repository.UpsertCaptureAsync(new HistoryCapture(new string('x', 5000) + index, null), default);
-            var entries = await repository.GetEntriesAsync(null, default);
-            await repository.PinAsync(entries[0].Id, default);
-            await repository.SetRetentionAsync(50);
-            Assert.Equal(51, (await repository.GetEntriesAsync(null, default)).Count);
-            await repository.ClearRecentAsync(default); await repository.MaintainAsync();
-            Assert.Single(await repository.GetEntriesAsync(null, default));
-            Assert.True(new FileInfo(path).Length < 100_000);
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                await using (var repository = await SqliteHistoryRepository.OpenAsync(path))
+                {
+                    await repository.ClearAllAsync(default);
+                    for (var index = 0; index < 65; index++) await repository.UpsertCaptureAsync(new HistoryCapture(new string('x', 5000) + index, null), default);
+                    var entries = await repository.GetEntriesAsync(null, default);
+                    await repository.PinAsync(entries[0].Id, default);
+                    await repository.SetRetentionAsync(50);
+                    Assert.Equal(51, (await repository.GetEntriesAsync(null, default)).Count);
+                    await repository.ClearRecentAsync(default); await repository.MaintainAsync();
+                    Assert.Single(await repository.GetEntriesAsync(null, default));
+                    Assert.True(new FileInfo(path).Length < 100_000);
+                }
+                await using var reopened = await SqliteHistoryRepository.OpenAsync(path);
+                Assert.Single(await reopened.GetEntriesAsync(null, default));
+                await using var raw = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+                await raw.OpenAsync();
+                await using var check = raw.CreateCommand();
+                check.CommandText = "PRAGMA integrity_check;";
+                Assert.Equal("ok", await check.ExecuteScalarAsync());
+            }
         }
         finally { Directory.Delete(directory, true); }
     }

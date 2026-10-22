@@ -76,3 +76,51 @@ Implementation report:
 | Engineering conformance | Focused review found no mismatch; native APIs remain in platform adapters |
 | Intent-drift-audit result | Focused handoff/identity/revision/single-dispatch review found no remaining implementation mismatch in changed scope; full application acceptance evidence missing |
 | Remaining risks | Uno tray/hotkey/row-click acceptance, real Notepad/browser/VS Code targets, macOS runtime and packaging remain unverified for this change |
+
+## Actual Windows panel / Notepad acceptance attempt (2026-10-22)
+
+Tested the Release executable through Windows Computer Use against a separate initially empty modern Notepad window. Only a harmless synthetic marker was entered/copied; existing Notepad documents were not edited.
+
+The existing profile could not start: the real application displayed `Startup unavailable` with `SqliteException`. A read-only SQLite `quick_check` independently failed with `database disk image is malformed`. This prevents normal-profile tray/hotkey acceptance. The cause of database corruption was not established by this check.
+
+For isolation, the original database and sidecars were temporarily moved aside without deletion, the exact settings bytes were backed up, and a temporary Ctrl+Alt+Shift+H registration was used with a test history. The genuine global hotkey opened the genuine Uno `Clipboard History` panel, and the copied marker was visible as a row. This establishes opening and capture, not insertion.
+
+The attempted row click was refused by Computer Use because the point was over another foreground application. Refresh showed that History had hidden after losing activation. No successful click or resulting Notepad insertion was established. Retrying the complete focus-sensitive scenario requires an uninterrupted desktop session.
+
+| Scenario | Result |
+| --- | --- |
+| Start with existing history | Failed: malformed SQLite database |
+| Capture harmless Notepad text into test history | Passed: marker visible in real History list |
+| Open real panel using registered global hotkey | Passed on isolated test history |
+| Select row and insert back into original Notepad field | Not verified: foreground changed before click |
+| Open from notification-area icon and insert into Notepad | Not verified: the available Computer Use window inventory did not expose a targetable taskbar/tray surface |
+
+The temporary application was stopped, original history/sidecars returned, and exact original settings restored (no assigned hotkey). The isolated test history was preserved under `%TEMP%/CSharpClipboard-e2e-run-20261022`. No implementation changes were made during this acceptance attempt. Full Windows end-to-end acceptance remains **not verified**.
+
+## SQLite corruption investigation and profile reset (2026-10-22)
+
+The user authorized discarding the affected history. Offline examination found a 16,384-byte file with 4,096-byte pages (four actual pages), but the database header at offset 28 declared 49 pages. Header change-counter and version-valid-for both equalled 3; schema version was 1. A temporary diagnostic copy with only the page-count field corrected (and rollback-mode header flags for opening the standalone copy) passed `PRAGMA integrity_check`. The profile was not repaired by patching raw header bytes.
+
+**The origin of that incorrect page count remains unproven.** The maintenance/shutdown corruption hypothesis was tested, not confirmed. No application code outside SQLite writes database pages. The shipped Windows x64 native SQLite reports 3.53.3; this is newer than the [3.51.3 fix for the WAL-reset corruption bug](https://www.sqlite.org/releaselog/3_51_3.html), so that old bug is not an established explanation. No speculative dependency or WAL-policy change was made.
+
+The existing maintenance integration test now repeats fill/retention/pin/clear/VACUUM, disposes and reopens the repository, and runs full SQLite integrity checking for three cycles. All passed. An additional temporary process probe used the production repository to commit a pinned synthetic baseline, repeatedly fill/clear/maintain, then was forcibly terminated 0, 1, 3, 10, 30 and 100 ms after signalling the maintenance boundary. Every restart passed `integrity_check` and retained the committed pinned baseline. These six timings exercise abrupt termination around maintenance; they do not prove power-loss durability or explain the original damaged file.
+
+Startup now performs `quick_check` before migration/configuration. SQLite corruption/not-a-database errors and non-ok integrity results become a content-free `HistoryDatabaseCorruptException`; the UI explains that the database is damaged and how to restore/recreate it while stopped. Corrupt input is never automatically deleted or silently replaced. Regression tests inject both the observed oversized header count and an invalid digest-index page, verify rejection, unchanged file bytes, released connection handles and no stored text in the exposed exception.
+
+With the application stopped, only the authorized profile `history.sqlite`, `history.sqlite-wal` and `history.sqlite-shm` were removed. Preferences were unchanged. The updated Release executable created a new schema-v1 database; an independent read-only `integrity_check` returned `ok`. A second launch exposed a native window titled `Clipboard History` rather than `Startup unavailable`. Computer Use could enumerate that window, but activation/capture was unreliable, so this does not upgrade the earlier tray/hotkey/paste acceptance status.
+
+| Implementation report | Result |
+| --- | --- |
+| Mode | satisfy-current-intent |
+| Specs used as intent | IDD-0003 durability/versioning; IDD-0011 understandable, private diagnostics |
+| Engineering rules applied | Always ENG-0001/0002/0004/0006/0007; Conditional ENG-0003; structure checked |
+| Behavior changed | Integrity validation and explicit damaged-database startup explanation |
+| Behavior preserved | No automatic data deletion; exact BLOB storage, transactions, WAL/FULL, schema version and rejection of unknown future versions |
+| Public contracts preserved | Repository/platform interfaces and persisted schema unchanged; one explicit corruption exception added |
+| Compatibility/data constraints | No compatibility adapter or migration; one-time profile reset explicitly authorized by user |
+| Code areas changed | Repository open validation and startup error presentation |
+| Tests changed | Two corruption regressions; existing maintenance scenario extended across restart/cycles/integrity checking |
+| Verification result | Release app build: zero warnings/errors; full solution: 99 passed, 4 interactive Windows tests skipped; storage subset: all 13 passed; six temporary crash probes passed |
+| Engineering conformance | Focused review found no mismatch; SQL remains in Storage, native UI in platform/UI layers, no content-bearing corruption diagnostics |
+| Intent-drift-audit result | Focused storage startup/maintenance review conforms to IDD-0003 and IDD-0011; no product-intent change required |
+| Remaining risks | Exact initiating cause unproven; macOS runtime and full Windows paste acceptance remain unverified |

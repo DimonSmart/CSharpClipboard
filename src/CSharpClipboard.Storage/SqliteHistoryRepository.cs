@@ -14,6 +14,11 @@ public sealed record HistoryRepositoryOptions
 
 public sealed class HistoryDatabaseVersionException(string message) : InvalidOperationException(message);
 
+public sealed class HistoryDatabaseCorruptException : InvalidOperationException
+{
+    public HistoryDatabaseCorruptException() : base("The history database is damaged. Restore a valid backup or recreate the database while the application is stopped.") { }
+}
+
 public sealed class HistoryStorageBusyException(string message, Exception innerException) : InvalidOperationException(message, innerException);
 
 public sealed class SqliteHistoryRepository : IHistoryRepository, IHistoryMaintenance, IAsyncDisposable
@@ -62,6 +67,12 @@ public sealed class SqliteHistoryRepository : IHistoryRepository, IHistoryMainte
             await VerifyAndMigrateAsync(connection, cancellationToken).ConfigureAwait(false);
             await ConfigureConnectionAsync(connection, options, cancellationToken).ConfigureAwait(false);
             return new SqliteHistoryRepository(connection, options, clock ?? TimeProvider.System);
+        }
+        catch (SqliteException error) when (error.SqliteErrorCode is 11 or 26)
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            // SQLite diagnostics may contain stored values; expose a content-free error.
+            throw new HistoryDatabaseCorruptException();
         }
         catch
         {
@@ -366,6 +377,14 @@ public sealed class SqliteHistoryRepository : IHistoryRepository, IHistoryMainte
         {
             throw new HistoryDatabaseVersionException(
                 $"History database schema version {version} is newer than supported version {SchemaVersion}.");
+        }
+
+        await using (var integrity = connection.CreateCommand())
+        {
+            integrity.CommandText = "PRAGMA quick_check;";
+            if (!string.Equals(await integrity.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string,
+                "ok", StringComparison.Ordinal))
+                throw new HistoryDatabaseCorruptException();
         }
 
         if (version == SchemaVersion)

@@ -84,6 +84,8 @@ public sealed partial class App : Application
 
     private static string StartupExplanation(Exception error) => error switch
     {
+        CSharpClipboard.Storage.HistoryDatabaseCorruptException =>
+            "History database is damaged. Quit the application, then restore a valid backup or remove history.sqlite and its -wal/-shm files from the application data folder to start with an empty history. Settings were preserved.",
         CSharpClipboard.Storage.HistoryDatabaseVersionException =>
             "History was created by a newer application version. Existing data was preserved.",
         System.Text.Json.JsonException or InvalidDataException =>

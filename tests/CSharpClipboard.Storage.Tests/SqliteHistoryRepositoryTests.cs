@@ -8,6 +8,38 @@ namespace CSharpClipboard.Storage.Tests;
 
 public sealed class SqliteHistoryRepositoryTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Damaged_header_or_index_is_reported_without_overwriting_or_leaking_content(bool damageHeader)
+    {
+        await using var database = new TemporaryDatabase();
+        await using (var repository = await OpenAsync(database.Path, new TestClock()))
+            await repository.UpsertCaptureAsync(new HistoryCapture("private synthetic value", null), default);
+
+        int indexPage;
+        await using (var raw = OpenRaw(database.Path))
+        await using (var command = raw.CreateCommand())
+        {
+            command.CommandText = "SELECT rootpage FROM sqlite_schema WHERE name = 'ix_history_entries_digest';";
+            indexPage = Convert.ToInt32(await command.ExecuteScalarAsync());
+        }
+        var damaged = await File.ReadAllBytesAsync(database.Path);
+        var pageSize = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(damaged.AsSpan(16, 2));
+        if (damageHeader)
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(damaged.AsSpan(28, 4), damaged.Length / pageSize + 45);
+        else
+            damaged[(indexPage - 1) * pageSize] = 0; // Invalid b-tree page, leaving the schema readable.
+        await File.WriteAllBytesAsync(database.Path, damaged);
+
+        var error = await Assert.ThrowsAsync<HistoryDatabaseCorruptException>(async () =>
+            await SqliteHistoryRepository.OpenAsync(database.Path));
+        Assert.Contains("damaged", error.Message);
+        Assert.DoesNotContain("private synthetic value", error.ToString());
+        Assert.Equal(damaged, await File.ReadAllBytesAsync(database.Path));
+        using var exclusive = new FileStream(database.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+    }
+
     [Fact]
     public async Task Upsert_preserves_created_and_pin_but_updates_copy_time_and_known_source()
     {
