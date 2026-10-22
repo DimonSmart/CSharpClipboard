@@ -37,7 +37,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private SingleInstanceLease? _instance;
     private TrayIcon? _tray;
     private NativeMenuItem? _pauseMenu, _trayStatus;
-    private Window? _panel, _settingsWindow, _preview, _feedback;
+    private Window? _panel, _settingsWindow, _preview, _feedback, _about;
     private readonly ListBox _list = new();
     private readonly TextBox _search = new() { Watermark = "Search history…" };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.65 };
@@ -47,6 +47,8 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private bool _contextMenuOpen;
     private int _disposed;
     internal Window? HistoryWindow => _panel;
+    internal Window? SettingsWindow => _settingsWindow;
+    internal Window? AboutWindow => _about;
 
     public DesktopShell(IClipboardPort clipboard, IClipboardWritePort writer, IPasteTargetPort<TSnapshot> targets,
         IDesktopPlatformServices platform, IClassicDesktopStyleApplicationLifetime desktop, SingleInstanceLease? instance = null)
@@ -72,7 +74,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         _paste = new PasteService<TSnapshot>(_targets, this, _clipboard, _writer, _capture);
         _instance.Activated += RequestHistory;
         _platform.HistoryRequested += RequestHistory;
-        CreateTray();
+        await CreateTrayAsync();
         if (_preferences.Shortcut is { } shortcut) await RunAsync(async () => await _platform.RegisterAsync(shortcut, default));
         if (!_preferences.Onboarded)
         {
@@ -86,8 +88,14 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private string DatabasePath => Path.Combine(_platform.DataDirectory, "history.sqlite");
     private string Modifier => _platform.UsesCommandKey ? "Cmd" : "Ctrl";
     private void RequestHistory() => Dispatcher.UIThread.Post(() => _ = RunAsync(ToggleHistoryAsync));
-    private void CreateTray()
+    private async Task CreateTrayAsync()
     {
+        if (_platform is IStatusItemPlatform nativeStatusItem)
+        {
+            await nativeStatusItem.CreateStatusItemAsync(OnStatusItemAction, _preferences.CapturePaused, default);
+            return;
+        }
+
         var menu = new NativeMenu();
         NativeMenuItem Item(string label, Action action) { var item = new NativeMenuItem(label); item.Click += (_, _) => action(); menu.Items.Add(item); return item; }
         Item("Clipboard History", RequestHistory);
@@ -103,12 +111,48 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         TrayIcon.SetIcons(Application.Current!, new TrayIcons { _tray });
     }
 
+    private void OnStatusItemAction(StatusItemAction action) =>
+        Dispatcher.UIThread.Post(() => _ = RunAsync(() => HandleStatusItemActionAsync(action)));
+
+    private async Task HandleStatusItemActionAsync(StatusItemAction action)
+    {
+        switch (action)
+        {
+            case StatusItemAction.OpenHistory:
+                await ToggleHistoryAsync();
+                break;
+            case StatusItemAction.ToggleCapture:
+                await TogglePauseAsync();
+                break;
+            case StatusItemAction.Settings:
+                ShowSettings();
+                break;
+            case StatusItemAction.ClearRecentHistory:
+                await ClearRecentAsync();
+                break;
+            case StatusItemAction.About:
+                ShowAbout();
+                break;
+            case StatusItemAction.Quit:
+                _desktop.TryShutdown();
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(action));
+        }
+    }
+
     internal async Task ToggleHistoryAsync()
     {
         if (!await _toggle.WaitAsync(0)) return;
         try
         {
-            if (_panel?.IsVisible == true) { await CloseHistoryAsync(); return; }
+            if (_panel?.IsVisible == true)
+            {
+                if (_platform is IStatusItemPlatform nativeStatusItem)
+                    await nativeStatusItem.DiscardPendingStatusItemSnapshotAsync(default);
+                await CloseHistoryAsync();
+                return;
+            }
             if (_invocation is not null) { await _invocation.DisposeAsync(); _invocation = null; }
             _invocation = await _paste!.OpenHistoryAsync();
         }
@@ -323,6 +367,8 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         if (pause) await _capture!.PauseAsync(); else await _capture!.ResumeAsync();
         _preferences = _preferences with { CapturePaused = pause }; await SaveAsync();
         if (_pauseMenu is not null) _pauseMenu.Header = pause ? "Resume Capture" : "Pause Capture";
+        if (_platform is IStatusItemPlatform nativeStatusItem)
+            await nativeStatusItem.SetStatusItemCapturePausedAsync(pause, default);
         _status.Text = pause ? "Capture paused" : "Capture active";
     }
     private Task SaveAsync() => _settings!.SetAsync("preferences", _preferences, default).AsTask();
@@ -426,6 +472,8 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private void ShowAbout()
     {
         var window = new Window { Title = "About CSharpClipboard", Width = 460, Height = 300, Icon = AppIcon.Create() };
+        _about = window;
+        window.Closed += (_, _) => { if (ReferenceEquals(_about, window)) _about = null; };
         var content = new StackPanel { Margin = new Thickness(20), Spacing = 16 };
         content.Children.Add(Label("CSharpClipboard " + typeof(App).Assembly.GetName().Version));
         var result = Label("Local clipboard history for Windows and macOS."); content.Children.Add(result);
@@ -449,7 +497,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _closing = true; _refresh.Stop(); _tray?.Dispose();
         _platform.HistoryRequested -= RequestHistory;
-        _panel?.Close(); _settingsWindow?.Close(); _preview?.Close(); _feedback?.Close();
+        _panel?.Close(); _settingsWindow?.Close(); _preview?.Close(); _feedback?.Close(); _about?.Close();
         if (_invocation is not null) await _invocation.DisposeAsync();
         try { if (_capture is not null) await _capture.DisposeAsync(); }
         finally

@@ -37,6 +37,11 @@ for file in "$STAGE/publish/"*; do
   name="$(basename "$file")"
   if [[ "$name" == CSharpClipboard.App ]]; then
     cp "$file" "$APP/Contents/MacOS/CSharpClipboard"
+  # The apphost resolves these three bootstrap files to establish its base directory.
+  # Keeping them as symlinks into Resources makes a self-contained app look for its
+  # runtime libraries relative to Resources rather than Contents/MacOS.
+  elif [[ "$name" == CSharpClipboard.App.dll || "$name" == CSharpClipboard.App.deps.json || "$name" == CSharpClipboard.App.runtimeconfig.json ]]; then
+    cp "$file" "$APP/Contents/MacOS/$name"
   elif file -b "$file" | grep -q 'Mach-O'; then
     cp "$file" "$APP/Contents/Frameworks/$name"
     ln -s "../Frameworks/$name" "$APP/Contents/MacOS/$name"
@@ -48,6 +53,11 @@ done
 chmod +x "$APP/Contents/MacOS/CSharpClipboard"
 for file in "$APP/Contents/Frameworks/"*; do
   if file -b "$file" | grep -q 'Mach-O'; then codesign --force --sign - "$file"; fi
+done
+# These are physical apphost bootstrap files in MacOS, so sign them before sealing
+# the enclosing bundle just like the nested native code.
+for file in CSharpClipboard.App.dll CSharpClipboard.App.deps.json CSharpClipboard.App.runtimeconfig.json; do
+  codesign --force --sign - "$APP/Contents/MacOS/$file"
 done
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"

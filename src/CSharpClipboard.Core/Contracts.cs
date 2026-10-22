@@ -202,3 +202,22 @@ public interface IDesktopPlatformServices : IGlobalShortcutPort, IStartupRegistr
     void OpenClipboardSettings();
     bool IsValidApplicationIdentifier(string identifier);
 }
+
+// A platform-owned status item keeps platform click semantics out of the Avalonia tray backend.
+// The shell owns the commands; the adapter owns native creation, lifetime and menu presentation.
+public enum StatusItemAction
+{
+    OpenHistory,
+    ToggleCapture,
+    Settings,
+    ClearRecentHistory,
+    About,
+    Quit
+}
+
+public interface IStatusItemPlatform
+{
+    ValueTask CreateStatusItemAsync(Action<StatusItemAction> onAction, bool capturePaused, CancellationToken cancellationToken);
+    ValueTask SetStatusItemCapturePausedAsync(bool capturePaused, CancellationToken cancellationToken);
+    ValueTask DiscardPendingStatusItemSnapshotAsync(CancellationToken cancellationToken);
+}

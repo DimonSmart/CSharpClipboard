@@ -13,7 +13,7 @@ private struct Target {
     var invalidated = false
 }
 
-@MainActor private final class Bridge {
+@MainActor private final class Bridge: NSObject {
     static let shared = Bridge()
     var targets: [String: Target] = [:]
     var observers: [NSObjectProtocol] = []
@@ -21,7 +21,13 @@ private struct Target {
     var handler: EventHandlerRef?
     var presses = 0
     var active = true
-    init() {
+    var statusItem: NSStatusItem?
+    var statusMenu: NSMenu?
+    var captureMenuItem: NSMenuItem?
+    var statusSnapshot: String?
+    var statusActions: [String] = []
+    private override init() {
+        super.init()
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { note in
             MainActor.assumeIsolated {
                 guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
@@ -75,10 +81,83 @@ private struct Target {
         }
         return nil
     }
+    func captureSnapshot() -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let (element, window) = focus(app) else { return nil }
+        let id = UUID().uuidString
+        targets[id] = Target(app: app, element: element, window: window)
+        return id
+    }
+    func discardStatusSnapshot() {
+        if let statusSnapshot { targets.removeValue(forKey: statusSnapshot) }
+        statusSnapshot = nil
+    }
+    func enqueueStatusAction(_ action: String) {
+        statusActions.append(action)
+    }
+    @objc private func statusItemPressed(_ sender: Any?) {
+        guard let event = NSApp.currentEvent else { return }
+        if event.type == .rightMouseDown || event.type == .rightMouseUp {
+            if let statusMenu, let button = statusItem?.button {
+                statusMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+            }
+            return
+        }
+        discardStatusSnapshot()
+        // Capture while the original app/field is still frontmost, before Avalonia activates History.
+        statusSnapshot = captureSnapshot()
+        enqueueStatusAction("openHistory")
+    }
+    @objc private func menuItemSelected(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? String else { return }
+        enqueueStatusAction(action)
+    }
+    func createStatusItem(capturePaused: Bool) {
+        if statusItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            guard let button = item.button else { return }
+            button.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "CSharpClipboard")
+            button.toolTip = "CSharpClipboard"
+            button.target = self
+            button.action = #selector(statusItemPressed(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+
+            let menu = NSMenu(title: "CSharpClipboard")
+            func add(_ title: String, _ action: String) {
+                let entry = NSMenuItem(title: title, action: #selector(menuItemSelected(_:)), keyEquivalent: "")
+                entry.target = self
+                entry.representedObject = action
+                menu.addItem(entry)
+                if action == "toggleCapture" { captureMenuItem = entry }
+            }
+            add("Open History", "openHistory")
+            add("Pause Capture", "toggleCapture")
+            add("Settings…", "settings")
+            add("Clear Recent History", "clearRecentHistory")
+            add("About", "about")
+            menu.addItem(.separator())
+            add("Quit", "quit")
+            statusItem = item
+            statusMenu = menu
+        }
+        setStatusItemCapturePaused(capturePaused)
+    }
+    func setStatusItemCapturePaused(_ capturePaused: Bool) {
+        captureMenuItem?.title = capturePaused ? "Resume Capture" : "Pause Capture"
+    }
+    func disposeStatusItem() {
+        discardStatusSnapshot()
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+        statusItem = nil
+        statusMenu = nil
+        captureMenuItem = nil
+        statusActions.removeAll()
+    }
     func call(_ op: String, _ args: [String: Any]) -> [String: Any] {
         let board = NSPasteboard.general
         switch op {
-        case "version": return ["value": 1]
+        case "version": return ["value": 2]
         case "path": return ["value": FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("CSharpClipboard").path]
         case "point":
             let point = NSEvent.mouseLocation
@@ -123,12 +202,13 @@ private struct Target {
         case "open":
             if let value = args["url"] as? String, let url = URL(string: value) { NSWorkspace.shared.open(url) }
             return [:]
-        case "snapshot":
-            guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
-                  let (element, window) = focus(app) else { return [:] }
-            let id = UUID().uuidString
-            targets[id] = Target(app: app, element: element, window: window)
-            return ["value": id]
+        case "snapshot": return captureSnapshot().map { ["value": $0] } ?? [:]
+        case "takeStatusSnapshot":
+            defer { statusSnapshot = nil }
+            return statusSnapshot.map { ["value": $0] } ?? [:]
+        case "discardStatusSnapshot": discardStatusSnapshot(); return [:]
+        case "createStatusItem": createStatusItem(capturePaused: args["capturePaused"] as? Bool ?? false); return [:]
+        case "setStatusItemCapturePaused": setStatusItemCapturePaused(args["capturePaused"] as? Bool ?? false); return [:]
         case "release":
             if let id = args["id"] as? String { targets.removeValue(forKey: id) }; return [:]
         case "restore":
@@ -171,10 +251,18 @@ private struct Target {
             guard RegisterEventHotKey(UInt32(code), carbon, EventHotKeyID(signature: 0x4353434C, id: 1), GetApplicationEventTarget(), 0, &next) == noErr else { return ["error": "shortcut_unavailable"] }
             if let hotkey { UnregisterEventHotKey(hotkey) }; hotkey = next; return [:]
         case "clearHotkey": if let hotkey { UnregisterEventHotKey(hotkey) }; hotkey = nil; return [:]
-        case "poll": let count = presses; presses = 0; return ["value": count]
+        case "poll":
+            let count = presses
+            presses = 0
+            let actions = statusActions
+            statusActions.removeAll()
+            return ["value": count, "actions": actions]
         case "dispose":
             if let hotkey { UnregisterEventHotKey(hotkey) }; hotkey = nil
             if let handler { RemoveEventHandler(handler) }; handler = nil
+            disposeStatusItem()
+            for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+            observers.removeAll()
             targets.removeAll(); return [:]
         default: return ["error": "unknown_operation"]
         }

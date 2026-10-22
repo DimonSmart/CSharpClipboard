@@ -17,7 +17,7 @@ public sealed class MacOSPasteSnapshot : IPasteTargetSnapshot
 
 // Dispatcher is supplied at composition: AppKit C ABI calls always run on the real main thread.
 // Timer callbacks only post work. UTF-8 JSON ownership ends at cc_free, before returning managed values.
-public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPasteTargetPort<MacOSPasteSnapshot>, IDesktopPlatformServices
+public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPasteTargetPort<MacOSPasteSnapshot>, IDesktopPlatformServices, IStatusItemPlatform
 {
     private readonly Func<Action, Task> _dispatch;
     private readonly Timer _timer;
@@ -27,6 +27,7 @@ public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPas
     private string _permission = "Default";
     private bool _accessibility;
     private string _startup = "Not registered";
+    private Action<StatusItemAction>? _statusItemAction;
     static MacOSIntegration()
     {
         if (OperatingSystem.IsMacOS()) NativeLibrary.SetDllImportResolver(typeof(MacOSIntegration).Assembly, (name, assembly, searchPath) =>
@@ -38,7 +39,7 @@ public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPas
     }
     public static void VerifyBridge()
     {
-        if (Call("version").GetProperty("value").GetInt32() != 1)
+        if (Call("version").GetProperty("value").GetInt32() != 2)
             throw new InvalidOperationException("macOS bridge version mismatch. Reinstall the matching application bundle.");
     }
     public static string GetDataDirectory() => Call("path").GetProperty("value").GetString()!;
@@ -73,7 +74,20 @@ public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPas
             {
                 var revision = new ClipboardRevision(Call("revision").GetProperty("value").GetString()!);
                 if (revision != _previous) { _previous = revision; Changed?.Invoke(this, new ClipboardSignal(revision)); }
-                if (Call("poll").GetProperty("value").GetInt32() > 0) HistoryRequested?.Invoke();
+                var pending = Call("poll");
+                if (pending.GetProperty("value").GetInt32() > 0) HistoryRequested?.Invoke();
+                if (pending.TryGetProperty("actions", out var actions))
+                    foreach (var action in actions.EnumerateArray())
+                        _statusItemAction?.Invoke(action.GetString() switch
+                        {
+                            "openHistory" => StatusItemAction.OpenHistory,
+                            "toggleCapture" => StatusItemAction.ToggleCapture,
+                            "settings" => StatusItemAction.Settings,
+                            "clearRecentHistory" => StatusItemAction.ClearRecentHistory,
+                            "about" => StatusItemAction.About,
+                            "quit" => StatusItemAction.Quit,
+                            _ => throw new InvalidOperationException("macOS status-item action is incompatible. Reinstall the complete matching .app bundle.")
+                        });
             }
             finally { _ticking = false; }
         }).ConfigureAwait(false);
@@ -121,6 +135,9 @@ public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPas
     public async ValueTask<MacOSPasteSnapshot?> GetActiveTargetAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var pending = await InvokeAsync("takeStatusSnapshot").ConfigureAwait(false);
+        if (pending.TryGetProperty("value", out var pendingId))
+            return new MacOSPasteSnapshot(pendingId.GetString()!, async value => { await InvokeAsync("release", new { id = value }).ConfigureAwait(false); });
         var result = await InvokeAsync("snapshot").ConfigureAwait(false);
         return result.TryGetProperty("value", out var id) ? new MacOSPasteSnapshot(id.GetString()!, async value => { await InvokeAsync("release", new { id = value }).ConfigureAwait(false); }) : null;
     }
@@ -160,10 +177,29 @@ public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPas
     public void OpenUrl(string url) => Call("open", new { url });
     public bool IsValidApplicationIdentifier(string identifier) => Regex.IsMatch(identifier, @"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$");
     public (int X, int Y) GetActivationPoint() { var result = Call("point"); return (result.GetProperty("x").GetInt32(), result.GetProperty("y").GetInt32()); }
+    public async ValueTask CreateStatusItemAsync(Action<StatusItemAction> onAction, bool capturePaused, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(onAction);
+        cancellationToken.ThrowIfCancellationRequested();
+        _statusItemAction = onAction;
+        await InvokeAsync("createStatusItem", new { capturePaused }).ConfigureAwait(false);
+    }
+    public async ValueTask SetStatusItemCapturePausedAsync(bool capturePaused, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await InvokeAsync("setStatusItemCapturePaused", new { capturePaused }).ConfigureAwait(false);
+    }
+    public async ValueTask DiscardPendingStatusItemSnapshotAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await InvokeAsync("discardStatusSnapshot").ConfigureAwait(false);
+    }
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        _timer.Dispose(); Call("dispose");
+        _statusItemAction = null;
+        _timer.Dispose();
+        _dispatch(() => Call("dispose")).GetAwaiter().GetResult();
     }
     private static class Native
     {

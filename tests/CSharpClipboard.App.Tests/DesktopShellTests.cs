@@ -73,8 +73,59 @@ public sealed class DesktopShellTests
         Directory.Delete(path, true);
     }
 
+    [AvaloniaFact]
+    public async Task Native_status_item_actions_are_routed_through_the_cross_platform_shell()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "CSharpClipboard.NativeStatusItem", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        var settings = new JsonSettingsStore(Path.Combine(path, "settings.json"));
+        await settings.SetAsync("preferences", new AppPreferences { Onboarded = true }, default);
+        await using (var seed = await SqliteHistoryRepository.OpenAsync(Path.Combine(path, "history.sqlite")))
+            await seed.UpsertCaptureAsync(new HistoryCapture("menu-item", null), default);
+        var lifetime = new ClassicDesktopStyleApplicationLifetime();
+        var port = new NativeStatusItemTestPort(path);
+        var shell = new DesktopShell<TestSnapshot>(port, port, port, port, lifetime);
+        try
+        {
+            await shell.StartAsync();
+            Assert.True(port.StatusItemCreated);
+
+            port.Invoke(StatusItemAction.OpenHistory);
+            await Task.Delay(100);
+            Assert.True(port.SnapshotBeforeShow);
+            Assert.True(shell.HistoryWindow?.IsVisible);
+
+            port.Invoke(StatusItemAction.ToggleCapture);
+            await Task.Delay(100);
+            Assert.Contains(true, port.CapturePausedUpdates);
+            Assert.True((await settings.GetAsync<AppPreferences>("preferences", default))!.CapturePaused);
+
+            port.Invoke(StatusItemAction.ClearRecentHistory);
+            await Task.Delay(100);
+            await using var verify = await SqliteHistoryRepository.OpenAsync(Path.Combine(path, "history.sqlite"));
+            Assert.Empty(await verify.GetEntriesAsync(null, default));
+
+            port.Invoke(StatusItemAction.Settings);
+            port.Invoke(StatusItemAction.About);
+            await Task.Delay(100);
+            Assert.NotNull(shell.SettingsWindow);
+            Assert.NotNull(shell.AboutWindow);
+
+            var quitRequested = false;
+            lifetime.ShutdownRequested += (_, eventArgs) => { quitRequested = true; eventArgs.Cancel = true; };
+            port.Invoke(StatusItemAction.Quit);
+            await Task.Delay(100);
+            Assert.True(quitRequested);
+        }
+        finally
+        {
+            await shell.DisposeAsync();
+            Directory.Delete(path, true);
+        }
+    }
+
     private sealed class TestSnapshot(Action release) : IPasteTargetSnapshot { public ValueTask DisposeAsync() { release(); return ValueTask.CompletedTask; } }
-    private sealed class TestPort(string directory) : IClipboardPort, IClipboardWritePort, IPasteTargetPort<TestSnapshot>, IDesktopPlatformServices
+    private class TestPort(string directory) : IClipboardPort, IClipboardWritePort, IPasteTargetPort<TestSnapshot>, IDesktopPlatformServices
     {
         public int Reads, Writes, Dispatches, Released;
         public bool Disposed, SnapshotBeforeShow;
@@ -106,5 +157,26 @@ public sealed class DesktopShellTests
         public ValueTask SetEnabledAsync(bool enabled, CancellationToken token) => ValueTask.CompletedTask;
         public ValueTask<PermissionStatus> GetClipboardAccessAsync(CancellationToken token) => ValueTask.FromResult(PermissionStatus.Allowed);
         public void Dispose() => Disposed = true;
+    }
+
+    private sealed class NativeStatusItemTestPort(string directory) : TestPort(directory), IStatusItemPlatform
+    {
+        private Action<StatusItemAction>? _action;
+        public bool StatusItemCreated { get; private set; }
+        public List<bool> CapturePausedUpdates { get; } = [];
+        public ValueTask CreateStatusItemAsync(Action<StatusItemAction> onAction, bool capturePaused, CancellationToken token)
+        {
+            _action = onAction;
+            StatusItemCreated = true;
+            CapturePausedUpdates.Add(capturePaused);
+            return ValueTask.CompletedTask;
+        }
+        public ValueTask SetStatusItemCapturePausedAsync(bool capturePaused, CancellationToken token)
+        {
+            CapturePausedUpdates.Add(capturePaused);
+            return ValueTask.CompletedTask;
+        }
+        public ValueTask DiscardPendingStatusItemSnapshotAsync(CancellationToken token) => ValueTask.CompletedTask;
+        public void Invoke(StatusItemAction action) => _action!.Invoke(action);
     }
 }
