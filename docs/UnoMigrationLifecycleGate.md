@@ -16,7 +16,7 @@ The first CI compile identified another migration constraint: Uno 6.7.30 declare
 
 | Required experiment | Windows 11 x64 | macOS 26+ arm64 |
 | --- | --- | --- |
-| Uno 6.7.30 project restores/builds | Not verified | Not verified |
+| Uno 6.7.30 project restores/builds | **CI Debug build passed** | **CI Debug build passed** |
 | `RunAsync` continues with zero visible windows, UI dispatcher available | Not verified | Not verified |
 | Create, hide, reopen and close the only window without native loop exit | Not verified | Not verified |
 | Quit when a UI window was never created; loop returns and process exits | Not verified | Not verified |
@@ -26,7 +26,7 @@ The first CI compile identified another migration constraint: Uno 6.7.30 declare
 | No-focus/no-flicker startup, Finder launch, no Dock/taskbar icon | Not verified | Not verified |
 | Native Quit, managed cleanup, idempotent disposal and partial-start failure | Not verified | Not verified |
 
-The experimental CI workflow compiles both targets, but cannot establish the interactive entries above. Mark a cell `Verified` only with OS version, execution procedure, observed result and a non-sensitive log/screenshot. Any failure must be resolved in the host/lifetime design **before stages 1–4**.
+Automated restore and Debug builds passed on both platforms in [GitHub Actions run 39774162839](https://github.com/DimonSmart/CSharpClipboard/actions/runs/39774162839). This is compile-only evidence: neither job started a desktop session, exercised a tray/status item, or checked native loop shutdown. The minimal probe's optimized Release build is not validated; the initial Release attempt was blocked by Uno DevServer validation (UNOB0019). Mark a cell `Verified` only with OS version, execution procedure, observed result and a non-sensitive log/screenshot. Any failure must be resolved in the host/lifetime design **before stages 1–4**.
 
 ## Next integration decisions (not yet implemented)
 
