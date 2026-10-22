@@ -1,0 +1,36 @@
+name: Uno lifecycle spike - compile only
+
+on:
+  push:
+    paths:
+      - 'spikes/UnoLifecycle/**'
+      - '.github/workflows/uno-lifecycle-spike.yml'
+  pull_request:
+    paths:
+      - 'spikes/UnoLifecycle/**'
+      - '.github/workflows/uno-lifecycle-spike.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: Build probe (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-26]
+    defaults:
+      run:
+        working-directory: spikes/UnoLifecycle
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore UnoLifecycleProbe.csproj
+      - name: Build (no UI smoke test)
+        run: dotnet build UnoLifecycleProbe.csproj -c Release --no-restore
