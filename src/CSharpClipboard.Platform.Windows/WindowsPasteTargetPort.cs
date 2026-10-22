@@ -179,9 +179,7 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
             element.GetCurrentPropertyValue(30019, out var password);
             element.GetCurrentPropertyValue(30010, out var enabled);
             element.GetCurrentPropertyValue(30002, out var process);
-            element.GetCurrentPropertyValue(30003, out var type);
-            element.GetCurrentPropertyValue(30009, out var focusable);
-            if (password is not false || enabled is not true || focusable is not true || type is not int control || control is not (50004 or 50030) || process is not int id || id != pid)
+            if (password is not false || enabled is not true || process is not int id || id != pid)
             {
                 return null;
             }
