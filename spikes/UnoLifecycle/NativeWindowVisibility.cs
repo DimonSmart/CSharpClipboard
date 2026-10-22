@@ -12,10 +12,16 @@ internal static partial class NativeWindowVisibility
     {
         if (OperatingSystem.IsWindows())
         {
-            var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
-            if (handle == IntPtr.Zero)
-                throw new InvalidOperationException("Win32 Uno window has no HWND.");
-            ShowWindow(handle, 0); // SW_HIDE; BOOL result means *previous* visibility.
+            // WindowNative.GetWindowHandle is an Uno AppWindow ID, not a Win32 HWND.
+            var native = Uno.UI.Xaml.WindowHelper.GetNativeWindow(window);
+            var property = native?.GetType().GetProperty("Hwnd", BindingFlags.Public | BindingFlags.Instance);
+            if (property?.GetValue(native) is not IntPtr handle || handle == IntPtr.Zero)
+                throw new InvalidOperationException("Win32 Uno window has no native HWND.");
+            if (!IsWindow(handle))
+                throw new InvalidOperationException("Uno returned an invalid Win32 HWND.");
+            _ = ShowWindow(handle, 0); // SW_HIDE; BOOL reports previous visibility.
+            if (IsWindowVisible(handle))
+                throw new InvalidOperationException("Win32 window remains visible after SW_HIDE.");
             ProbeLog.Write($"Win32 ShowWindow(SW_HIDE) called: hwnd=0x{handle.ToInt64():X}");
         }
         else if (OperatingSystem.IsMacOS())
@@ -43,6 +49,14 @@ internal static partial class NativeWindowVisibility
     [LibraryImport("user32.dll", EntryPoint = "ShowWindow")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool ShowWindow(IntPtr hwnd, int command);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(IntPtr hwnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsWindowVisible")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(IntPtr hwnd);
 
     [LibraryImport("/usr/lib/libobjc.A.dylib", EntryPoint = "sel_registerName", StringMarshalling = StringMarshalling.Utf8)]
     private static partial IntPtr SelRegisterName(string selectorName);

@@ -10,5 +10,7 @@
     <ProjectReference Include="../../src/CSharpClipboard.Core/CSharpClipboard.Core.csproj" />
     <Compile Include="../../src/CSharpClipboard.App/SingleInstanceLease.cs" Link="SingleInstanceLease.cs" />
     <Compile Include="../../src/CSharpClipboard.App/ReleaseChecker.cs" Link="ReleaseChecker.cs" />
+    <Compile Include="../../src/CSharpClipboard.App/WindowVisibilityTracker.cs" Link="WindowVisibilityTracker.cs" />
+    <Compile Include="../../src/CSharpClipboard.App/UnoWin32WindowHandle.cs" Link="UnoWin32WindowHandle.cs" />
   </ItemGroup>
 </Project>

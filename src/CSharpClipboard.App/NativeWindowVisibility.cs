@@ -12,9 +12,13 @@ internal static partial class NativeWindowVisibility
     {
         if (OperatingSystem.IsWindows())
         {
-            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
-            if (hwnd == IntPtr.Zero) throw new InvalidOperationException("Uno window has no HWND.");
-            ShowWindow(hwnd, 0);
+            // Uno's WindowNative.GetWindowHandle returns an AppWindow ID, not a Win32 HWND.
+            var native = Uno.UI.Xaml.WindowHelper.GetNativeWindow(window);
+            var hwnd = UnoWin32WindowHandle.Resolve(native);
+            if (!IsWindow(hwnd)) throw new InvalidOperationException("Uno returned an invalid Win32 HWND.");
+            _ = ShowWindow(hwnd, 0); // The return value is the PREVIOUS visibility, not success.
+            if (IsWindowVisible(hwnd))
+                throw new InvalidOperationException("Could not hide the native Win32 window.");
         }
         else if (OperatingSystem.IsMacOS())
         {
@@ -31,6 +35,14 @@ internal static partial class NativeWindowVisibility
     [LibraryImport("user32.dll", EntryPoint = "ShowWindow")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool ShowWindow(IntPtr hwnd, int command);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(IntPtr hwnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsWindowVisible")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(IntPtr hwnd);
 
     [LibraryImport("/usr/lib/libobjc.A.dylib", EntryPoint = "sel_registerName", StringMarshalling = StringMarshalling.Utf8)]
     private static partial IntPtr SelRegisterName(string selectorName);

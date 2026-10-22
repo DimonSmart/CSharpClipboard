@@ -29,8 +29,9 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private readonly Action _quit;
     private readonly HistoryPresentation _presentation = new();
     private readonly SemaphoreSlim _toggle = new(1, 1);
-    private readonly HashSet<Window> _visible = [];
+    private readonly WindowVisibilityTracker<Window> _visible = new(NativeWindowVisibility.Hide);
     private readonly List<Window> _windows = [];
+    private readonly HashSet<Guid> _pinsInProgress = [];
     private readonly SingleInstanceLease _instance;
     private IHistoryRepository? _history;
     private IHistoryMaintenance? _maintenance;
@@ -43,6 +44,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private HistoryView? _view;
     private int _searchVersion;
     private bool _refreshing;
+    private bool _refreshPending;
     private bool _closing;
     private bool _contextMenuOpen;
     private int _disposed;
@@ -217,19 +219,23 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         {
             if (_closing) return;
             args.Cancel = true;
-            if (onHide is not null) onHide();
-            else HideWindow(window);
+            try
+            {
+                if (onHide is not null) onHide();
+                else HideWindow(window);
+            }
+            catch (Exception error)
+            {
+                System.Diagnostics.Trace.TraceError("CSharpClipboard window hide failed: " + error);
+            }
         };
         _windows.Add(window);
         return window;
     }
 
-    private void ShowWindow(Window window) { _visible.Add(window); window.Activate(); }
-    private void HideWindow(Window window)
-    {
-        if (_visible.Remove(window)) NativeWindowVisibility.Hide(window);
-    }
-    private bool IsShown(Window? window) => window is not null && _visible.Contains(window);
+    private void ShowWindow(Window window) { _visible.MarkVisible(window); window.Activate(); }
+    private void HideWindow(Window window) => _visible.Hide(window);
+    private bool IsShown(Window? window) => _visible.IsVisible(window);
 
     private void RenderRows() => ApplyRows(_presentation.Filter(_view?.SearchBox.Text ?? ""));
     private async Task UpdateRowsAsync()
@@ -357,12 +363,18 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
 
     private async Task PinAsync(HistoryEntry entry)
     {
-        await Task.Run(async () =>
+        // A second click/key press may arrive before the first update has rendered.
+        if (!_pinsInProgress.Add(entry.Id)) return;
+        try
         {
-            if (entry.PinnedAt is null) await _history!.PinAsync(entry.Id, default);
-            else await _history!.UnpinAsync(entry.Id, default);
-        });
-        await RefreshAsync();
+            await Task.Run(async () =>
+            {
+                if (entry.PinnedAt is null) await _history!.PinAsync(entry.Id, default);
+                else await _history!.UnpinAsync(entry.Id, default);
+            });
+            await RefreshAsync();
+        }
+        finally { _pinsInProgress.Remove(entry.Id); }
     }
     private async Task DeleteAsync(HistoryEntry entry)
     {
@@ -385,16 +397,22 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
 
     private async Task RefreshAsync()
     {
-        if (_refreshing || _history is null || _closing) return;
+        if (_history is null || _closing) return;
+        if (_refreshing) { _refreshPending = true; return; }
         _refreshing = true;
         try
         {
-            if (IsShown(_panel))
+            do
             {
-                var entries = await Task.Run(async () => await _history.GetEntriesAsync(null, default));
-                _presentation.Refresh(entries);
-                await UpdateRowsAsync();
+                _refreshPending = false;
+                if (IsShown(_panel))
+                {
+                    var entries = await Task.Run(async () => await _history.GetEntriesAsync(null, default));
+                    _presentation.Refresh(entries);
+                    await UpdateRowsAsync();
+                }
             }
+            while (_refreshPending && !_closing);
         }
         finally { _refreshing = false; }
     }

@@ -26,3 +26,9 @@ Do not claim migration acceptance criteria or safe public release as verified un
 ## History opening snapshot
 
 IDD-0003 / IDD-0004: History loads rows at opening with no periodic refresh. Search uses the snapshot. Explicit pin/delete/clear updates existing entries without importing new ones. Regression: HistoryPresentationTests.Open_snapshot_excludes_new_entries_until_reopening_and_reflects_explicit_changes (Windows: passed, Services 42/42). Interactive Windows/macOS A15: not verified.
+
+## Win32 native HWND and History pin/close regression (2026-10-22)
+
+The Windows native hide code now resolves the real HWND from Uno's native Win32 window peer, instead of passing `WindowNative.GetWindowHandle` (an Uno AppWindow ID) to Win32. The lifecycle spike uses the same correct lookup. Window visibility is marked hidden only after a successful native hide; failures keep the logical state visible, allowing a retry. Reentrant deactivation cannot start a second native hide. Pin/unpin ignores overlapping actions on one entry and pending refreshes are replayed after an in-progress refresh.
+
+Noninteractive regression coverage: `WindowVisibilityTests` exercises successful/failing/reentrant hide state transitions and extraction of `Hwnd` (excluding ID-only peers). **Interactive Windows 11 behavior remains not verified**; check History close-button hide/reopen, Pin/Unpin button and keyboard shortcuts, Settings/About/Preview closing, and tray/clipboard continuity on actual Windows before closing the lifecycle release gate.
