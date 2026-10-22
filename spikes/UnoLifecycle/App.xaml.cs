@@ -116,8 +116,9 @@ public sealed partial class App : Application
 
     private void HideWindow()
     {
-        _window?.AppWindow.Hide();
-        ProbeLog.Write("AppWindow.Hide called; host must remain alive.");
+        if (_window is not null)
+            NativeWindowVisibility.Hide(_window);
+        ProbeLog.Write("Native window hide requested; host must remain alive.");
     }
 
     private void CloseWindow()

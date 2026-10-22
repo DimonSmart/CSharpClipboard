@@ -10,6 +10,8 @@ CSharpClipboard is a persistent clipboard utility. A normal `Window.Close()` mus
 
 Until evidence is collected, replacing `CSharpClipboard.App` would risk losing tray functionality or running duplicate clipboard monitors. Therefore the existing application and release workflow remain unchanged.
 
+The first CI compile identified another migration constraint: Uno 6.7.30 declares \`AppWindow.Hide()\` but reports it as not implemented (\`Uno0001\`). The probe therefore exercises native Win32/AppKit hide operations. Their runtime behavior is **not verified**.
+
 ## Stage-0 verification matrix
 
 | Required experiment | Windows 11 x64 | macOS 26+ arm64 |
