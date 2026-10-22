@@ -50,6 +50,7 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
                 }
                 clipboard.ForegroundChanged += Observe;
                 snapshot.Release = () => clipboard.ForegroundChanged -= Observe;
+                LastRefusal = null;
                 return snapshot;
             }
             catch (Exception error) { LastRefusal = error.GetType().Name; return null; }
@@ -58,13 +59,66 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
 
     public async ValueTask<bool> TryRestoreAsync(WindowsPasteSnapshot snapshot, CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref snapshot.Invalidated) != 0 || !TrustedDesktop() || !SameIntegrity(snapshot.ProcessId)) return false;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Volatile.Read(ref snapshot.Invalidated) != 0 || !TrustedDesktop() || !SameIntegrity(snapshot.ProcessId))
+        {
+            LastRefusal = "invalidated/desktop/integrity";
+            return false;
+        }
         var foreground = Native.GetForegroundWindow();
         Native.GetWindowThreadProcessId(foreground, out var pid);
-        if (foreground != snapshot.Window && pid != _applicationProcessId) return false;
-        if (foreground != snapshot.Window && !Native.SetForegroundWindow(snapshot.Window)) return false;
-        // Never SetFocus on the remembered control. Re-observe the naturally restored focus.
-        return await Task.Run(() => Matches(snapshot), cancellationToken).ConfigureAwait(false);
+        if (foreground != snapshot.Window && pid != _applicationProcessId)
+        {
+            LastRefusal = "different foreground application";
+            return false;
+        }
+        if (foreground != snapshot.Window && !Native.SetForegroundWindow(snapshot.Window))
+        {
+            LastRefusal = "foreground activation refused";
+            return false;
+        }
+        // Restoring the foreground window and its focused child is asynchronous on
+        // Windows 11 (including Notepad). Never force SetFocus: only wait for the
+        // original HWND and UIA runtime identity to be restored naturally.
+        var restored = await WindowsFocusRestoreWaiter.WaitAsync(
+            () => CheckRestoredFocus(snapshot), cancellationToken).ConfigureAwait(false);
+        LastRefusal = restored ? null : "original focus not restored";
+        return restored;
+    }
+
+    private WindowsFocusRestoreState CheckRestoredFocus(WindowsPasteSnapshot snapshot)
+    {
+        try
+        {
+            if (Volatile.Read(ref snapshot.Invalidated) != 0 || !TrustedDesktop() || !SameIntegrity(snapshot.ProcessId))
+                return WindowsFocusRestoreState.Rejected;
+            var foreground = Native.GetForegroundWindow();
+            if (foreground != snapshot.Window)
+            {
+                Native.GetWindowThreadProcessId(foreground, out var foregroundPid);
+                return foregroundPid == _applicationProcessId
+                    ? WindowsFocusRestoreState.Pending : WindowsFocusRestoreState.Rejected;
+            }
+            var thread = Native.GetWindowThreadProcessId(snapshot.Window, out var pid);
+            if (pid != snapshot.ProcessId || thread != snapshot.ThreadId || ProcessStart(pid) != snapshot.Started)
+                return WindowsFocusRestoreState.Rejected;
+            var gui = new GuiInfo { Size = Marshal.SizeOf<GuiInfo>() };
+            if (!Native.GetGUIThreadInfo(thread, ref gui) || gui.Focus == IntPtr.Zero)
+                return WindowsFocusRestoreState.Pending;
+            // A different focused control is a user/context change, not a slow
+            // restore; never wait for it to become the old field again.
+            if (gui.Focus != snapshot.Focus) return WindowsFocusRestoreState.Rejected;
+            var id = FocusedIdentity(pid, gui.Focus);
+            return id is null ? WindowsFocusRestoreState.Pending
+                : id.SequenceEqual(snapshot.ElementId)
+                    ? WindowsFocusRestoreState.Matched : WindowsFocusRestoreState.Rejected;
+        }
+        catch
+        {
+            // A transient UIA failure may clear once the original window settles.
+            // All attempts remain subject to the same PID, HWND and desktop checks.
+            return WindowsFocusRestoreState.Pending;
+        }
     }
 
     public async ValueTask<PasteDispatchResult> TryDispatchAsync(WindowsPasteSnapshot snapshot, ClipboardRevision expectedRevision, CancellationToken cancellationToken)
@@ -91,7 +145,8 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
                 // Release only keys introduced by this dispatch. Never retry a partial shortcut.
                 Native.SendInput(2, [ScanKey((ushort)scan, true), Key(0x11, true)], Marshal.SizeOf<Input>());
             }
-            return sent > 0 ? PasteDispatchResult.ShortcutSent : PasteDispatchResult.TargetUnavailable;
+            // Sending only some key events is not a completed Ctrl+V shortcut.
+            return WindowsPasteSendResult.FromSentCount(sent, (uint)inputs.Length);
         }, cancellationToken).ConfigureAwait(false);
     }
 
