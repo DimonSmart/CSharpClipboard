@@ -58,6 +58,7 @@
 | IDD-0003-AC3 | Pin переживает retention, Clear Recent и restart. | Real SQLite integration + Unicode corpus + measured maintenance/search | not verified | — |
 | IDD-0003-AC4 | Нет потери atomicity при исключении во время транзакции. | Real SQLite integration + Unicode corpus + measured maintenance/search | not verified | — |
 | IDD-0003-AC5 | 500 элементов + разумное число pins фильтруются без ощутимых задержек; начальная проверка: 100 поисков в контрольном наборе менее ~2 секунд на тестовой машине (фиксировать аппаратные условия, не выдавать этот порог за универсальную гарантию). | Real SQLite integration + Unicode corpus + measured maintenance/search | not verified | — |
+| IDD-0004-PIN | Иконки закреплённой и незакреплённой записи визуально различаются; pin/unpin сразу меняет иконку, подсказку и доступное имя в обеих темах. | Manual pin/unpin + light/dark themes + accessibility | not verified | — |
 | IDD-0004-AC1 | Все команды доступны с клавиатуры и мышью, доступны для screen reader. | UI automation + manual keyboard/focus/accessibility/displays | not verified | — |
 | IDD-0004-AC2 | History открывается на корректном мониторе и остаётся в видимой области после изменения DPI/подключения дисплея. | UI automation + manual keyboard/focus/accessibility/displays | not verified | — |
 | IDD-0004-AC3 | Click вне панели, Escape, закрытие и повторный hotkey не вставляют текст. | UI automation + manual keyboard/focus/accessibility/displays | not verified | — |
