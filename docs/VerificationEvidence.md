@@ -124,3 +124,9 @@ With the application stopped, only the authorized profile `history.sqlite`, `his
 | Engineering conformance | Focused review found no mismatch; SQL remains in Storage, native UI in platform/UI layers, no content-bearing corruption diagnostics |
 | Intent-drift-audit result | Focused storage startup/maintenance review conforms to IDD-0003 and IDD-0011; no product-intent change required |
 | Remaining risks | Exact initiating cause unproven; macOS runtime and full Windows paste acceptance remain unverified |
+
+## Limited Windows console-target identification fallback (2026-10-23)
+
+The Windows paste target now retains strict UIA RuntimeId checks for ordinary fields. For known terminal hosts only (classic `conhost`/`OpenConsole` with `ConsoleWindowClass`, Windows Terminal with `CASCADIA_HOSTING_WINDOW_CLASS`), unavailable UIA identity may fall back to checking the same PID, process start, foreground HWND, GUI thread, focused HWND within the window, executable name, and window class. A positively reported UIA password or disabled element still refuses automatic paste. Existing trusted desktop, integrity, clipboard-revision and single-dispatch safeguards remain unchanged. No simulated typing or paste shortcut changes were introduced.
+
+Unit tests cover matching class/process pairs and lookalike/unknown hosts. Interactive end-to-end confirmation in Windows Terminal and classic conhost is **not verified**. In particular, tab/pane switches within a terminal that retain the same focused HWND cannot be distinguished by window-level identity alone; verify this limitation and treat as an unresolved safety constraint for such targets. The Windows host must be tested with real non-elevated console windows and full hotkey → UI selection → paste flow before considering this acceptance complete.

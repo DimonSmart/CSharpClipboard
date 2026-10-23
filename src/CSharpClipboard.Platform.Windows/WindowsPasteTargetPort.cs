@@ -14,6 +14,7 @@ public sealed class WindowsPasteSnapshot : IPasteTargetSnapshot
     internal uint ThreadId { get; init; }
     internal long Started { get; init; }
     internal int[] ElementId { get; init; } = [];
+    internal bool ConsoleWindowFallback { get; init; }
     internal int Invalidated;
     internal Action? Release;
     public ValueTask DisposeAsync() { Interlocked.Exchange(ref Invalidated, 1); Interlocked.Exchange(ref Release, null)?.Invoke(); return ValueTask.CompletedTask; }
@@ -40,9 +41,17 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
                 var gui = new GuiInfo { Size = Marshal.SizeOf<GuiInfo>() };
                 if (!Native.GetGUIThreadInfo(thread, ref gui) || gui.Focus == IntPtr.Zero) { LastRefusal = "focus unavailable"; return null; }
                 var identity = FocusedIdentity(pid, gui.Focus);
-                if (identity is null || Native.GetForegroundWindow() != window) { LastRefusal = "UIA identity/foreground changed"; return null; }
+                var consoleFallback = identity.State == WindowsFocusIdentityState.Unavailable &&
+                    IsRecognizedConsoleWindow(pid, window) && IsFocusWithinWindow(window, gui.Focus);
+                if ((identity.State != WindowsFocusIdentityState.Verified && !consoleFallback) ||
+                    Native.GetForegroundWindow() != window)
+                {
+                    LastRefusal = "UIA identity/console fallback/foreground unavailable";
+                    return null;
+                }
                 var snapshot = new WindowsPasteSnapshot { Window = window, Focus = gui.Focus, ProcessId = pid,
-                    ThreadId = thread, Started = ProcessStart(pid), ElementId = identity };
+                    ThreadId = thread, Started = ProcessStart(pid), ElementId = identity.RuntimeId ?? [],
+                    ConsoleWindowFallback = consoleFallback };
                 void Observe(IntPtr foreground)
                 {
                     Native.GetWindowThreadProcessId(foreground, out var owner);
@@ -108,9 +117,13 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
             // A different focused control is a user/context change, not a slow
             // restore; never wait for it to become the old field again.
             if (gui.Focus != snapshot.Focus) return WindowsFocusRestoreState.Rejected;
-            var id = FocusedIdentity(pid, gui.Focus);
-            return id is null ? WindowsFocusRestoreState.Pending
-                : id.SequenceEqual(snapshot.ElementId)
+            if (snapshot.ConsoleWindowFallback)
+                return ConsoleFocusMatches(snapshot, pid, gui.Focus)
+                    ? WindowsFocusRestoreState.Matched : WindowsFocusRestoreState.Rejected;
+            var identity = FocusedIdentity(pid, gui.Focus);
+            return identity.State == WindowsFocusIdentityState.Unavailable ? WindowsFocusRestoreState.Pending
+                : identity.State == WindowsFocusIdentityState.Verified &&
+                  identity.RuntimeId is { } id && id.SequenceEqual(snapshot.ElementId)
                     ? WindowsFocusRestoreState.Matched : WindowsFocusRestoreState.Rejected;
         }
         catch
@@ -158,13 +171,20 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
             var thread = Native.GetWindowThreadProcessId(snapshot.Window, out var pid);
             if (pid != snapshot.ProcessId || thread != snapshot.ThreadId || ProcessStart(pid) != snapshot.Started) return false;
             var gui = new GuiInfo { Size = Marshal.SizeOf<GuiInfo>() };
-            return Native.GetGUIThreadInfo(thread, ref gui) && gui.Focus == snapshot.Focus &&
-                   FocusedIdentity(pid, gui.Focus) is { } id && id.SequenceEqual(snapshot.ElementId);
+            if (!Native.GetGUIThreadInfo(thread, ref gui) || gui.Focus != snapshot.Focus) return false;
+            if (snapshot.ConsoleWindowFallback) return ConsoleFocusMatches(snapshot, pid, gui.Focus);
+            var identity = FocusedIdentity(pid, gui.Focus);
+            return identity.State == WindowsFocusIdentityState.Verified &&
+                   identity.RuntimeId is { } id && id.SequenceEqual(snapshot.ElementId);
         }
         catch { return false; }
     }
 
-    private static int[]? FocusedIdentity(uint pid, IntPtr focusedWindow)
+    private readonly record struct FocusIdentity(WindowsFocusIdentityState State, int[]? RuntimeId);
+
+    // Console windows can be keyboard-focusable even when UIA exposes no usable element.
+    // A positive password/disabled result still blocks the limited console fallback.
+    private static FocusIdentity FocusedIdentity(uint pid, IntPtr focusedWindow)
     {
         object? automation = null;
         IElement? element = null;
@@ -173,24 +193,53 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
             automation = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("FF48DBA4-60EF-4201-AA87-54103EEF594E"), true)!);
             var className = new System.Text.StringBuilder(256);
             Native.GetClassName(focusedWindow, className, className.Capacity);
-            if (className.ToString().Equals("Edit", StringComparison.OrdinalIgnoreCase) || className.ToString().StartsWith("RichEdit", StringComparison.OrdinalIgnoreCase))
+            if (className.ToString().Equals("Edit", StringComparison.OrdinalIgnoreCase) ||
+                className.ToString().StartsWith("RichEdit", StringComparison.OrdinalIgnoreCase))
                 ((IAutomation)automation!).ElementFromHandle(focusedWindow, out element);
             else ((IAutomation)automation!).GetFocusedElement(out element);
+            if (element is null) return new(WindowsFocusIdentityState.Unavailable, null);
             element.GetCurrentPropertyValue(30019, out var password);
             element.GetCurrentPropertyValue(30010, out var enabled);
             element.GetCurrentPropertyValue(30002, out var process);
+            if (password is true || enabled is false)
+                return new(WindowsFocusIdentityState.Protected, null);
             if (password is not false || enabled is not true || process is not int id || id != pid)
-            {
-                return null;
-            }
+                return new(WindowsFocusIdentityState.Unavailable, null);
             element.GetRuntimeId(out var runtimeId);
-            return runtimeId is { Length: > 0 } ? runtimeId : null;
+            return runtimeId is { Length: > 0 }
+                ? new(WindowsFocusIdentityState.Verified, runtimeId)
+                : new(WindowsFocusIdentityState.Unavailable, null);
+        }
+        catch (Exception)
+        {
+            // UIA availability is not an input permission check. Only allow a fallback
+            // if the independent console-host window/process checks succeed.
+            return new(WindowsFocusIdentityState.Unavailable, null);
         }
         finally
         {
             if (element is not null) Marshal.FinalReleaseComObject(element);
             if (automation is not null) Marshal.FinalReleaseComObject(automation);
         }
+    }
+
+    private static bool ConsoleFocusMatches(WindowsPasteSnapshot snapshot, uint pid, IntPtr focus)
+    {
+        if (!IsFocusWithinWindow(snapshot.Window, focus) ||
+            !IsRecognizedConsoleWindow(pid, snapshot.Window)) return false;
+        // Recheck UIA protection on every restore/dispatch; lack of UIA alone is allowed.
+        return FocusedIdentity(pid, focus).State != WindowsFocusIdentityState.Protected;
+    }
+
+    private static bool IsFocusWithinWindow(IntPtr window, IntPtr focus) =>
+        focus != IntPtr.Zero && (focus == window || Native.GetAncestor(focus, 2) == window);
+
+    private static bool IsRecognizedConsoleWindow(uint pid, IntPtr window)
+    {
+        var className = new System.Text.StringBuilder(128);
+        if (Native.GetClassName(window, className, className.Capacity) == 0) return false;
+        using var process = Process.GetProcessById((int)pid);
+        return WindowsConsoleTargetPolicy.IsRecognizedConsoleHost(className.ToString(), process.ProcessName);
     }
 
     private static bool TrustedDesktop()
@@ -268,6 +317,7 @@ public sealed class WindowsPasteTargetPort : IPasteTargetPort<WindowsPasteSnapsh
     {
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int count);
+        [DllImport("user32.dll")] internal static extern IntPtr GetAncestor(IntPtr window, uint flags);
         [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
         [DllImport("user32.dll")] internal static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
         [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr window);
