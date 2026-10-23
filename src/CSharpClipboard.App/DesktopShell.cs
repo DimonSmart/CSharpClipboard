@@ -53,6 +53,8 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private bool _refreshPending;
     private bool _closing;
     private bool _contextMenuOpen;
+    private bool _initialHistoryFocusPending;
+    private string _lastHistorySearchText = "";
     private int _disposed;
 
     internal Window? HistoryWindow => _panel;
@@ -161,23 +163,24 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         {
             EnsurePanel();
             _presentation.Open(entries);
+            ++_searchVersion; // Invalidate unfinished filtering from the previous opening.
+            _lastHistorySearchText = "";
             _view!.SearchBox.Text = "";
             RenderRows();
+            _initialHistoryFocusPending = true;
             ShowWindow(_panel!);
-            if (_view.HistoryList.Items.Count > 0)
-            {
-                _view.HistoryList.SelectedIndex = 0;
-                _view.HistoryList.Focus(FocusState.Programmatic);
-            }
-            else _view.SearchBox.Focus(FocusState.Programmatic);
+            // Uno can activate and measure the native window after Show returns.
+            Post(FocusInitialHistorySelection);
         });
     }
 
     public ValueTask HideAsync(Guid invocationId, CancellationToken cancellationToken) =>
-        new(UiAsync(() => { if (_panel is not null) HideWindow(_panel); }));
+        new(UiAsync(() => { _initialHistoryFocusPending = false; if (_panel is not null) HideWindow(_panel); }));
 
     internal async Task CloseHistoryAsync()
     {
+        _initialHistoryFocusPending = false;
+        ++_searchVersion;
         if (_panel is not null) HideWindow(_panel);
         if (_invocation is { } current)
         {
@@ -200,19 +203,31 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
             if (e.ClickedItem is ListViewItem item && item.Tag is HistoryEntry entry)
                 _ = RunAsync(() => SelectAsync(entry, false));
         };
-        _view.HistoryList.KeyDown += PanelKeyDown;
+        // PreviewKeyDown precedes ListViewItem's built-in arrow/Enter handling.
+        _view.HistoryList.PreviewKeyDown += HistoryListPreviewKeyDown;
         _view.SearchBox.KeyDown += PanelKeyDown;
         _view.SearchBox.TextChanged += async (_, _) =>
         {
+            // The programmatic reset at opening must not recreate a focused row.
+            var query = _view.SearchBox.Text;
+            if (query == _lastHistorySearchText) return;
+            _lastHistorySearchText = query;
+            if (!IsShown(_panel)) return;
             var version = ++_searchVersion;
             await Task.Delay(100);
-            if (version == _searchVersion) await RunAsync(UpdateRowsAsync);
+            if (version == _searchVersion && IsShown(_panel)) await RunAsync(UpdateRowsAsync);
         };
+        _view.Loaded += (_, _) => Post(FocusInitialHistorySelection);
         _panel.Activated += (_, args) =>
         {
+            if (args.WindowActivationState != CoreWindowActivationState.Deactivated)
+            {
+                // One-shot focus: never steal focus again from search or row buttons.
+                Post(FocusInitialHistorySelection);
+                return;
+            }
             // Deactivation may be caused by an intentional context menu or preview.
-            if (args.WindowActivationState == CoreWindowActivationState.Deactivated &&
-                !_contextMenuOpen && !IsShown(_preview) && !_closing && IsShown(_panel))
+            if (!_contextMenuOpen && !IsShown(_preview) && !_closing && IsShown(_panel))
                 _ = RunAsync(CloseHistoryAsync);
         };
     }
@@ -242,6 +257,23 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private void ShowWindow(Window window) => _visible.Show(window);
     private void HideWindow(Window window) => _visible.Hide(window);
     private bool IsShown(Window? window) => _visible.IsVisible(window);
+
+    private void FocusInitialHistorySelection()
+    {
+        if (!_initialHistoryFocusPending || !IsShown(_panel) || _view is null) return;
+        var list = _view.HistoryList;
+        if (list.Items.Count == 0)
+        {
+            if (_view.SearchBox.Focus(FocusState.Programmatic))
+                _initialHistoryFocusPending = false;
+            return;
+        }
+        list.SelectedIndex = 0;
+        var first = (ListViewItem)list.Items[0];
+        list.ScrollIntoView(first);
+        if (first.Focus(FocusState.Keyboard) || list.Focus(FocusState.Keyboard))
+            _initialHistoryFocusPending = false;
+    }
 
     private void RenderRows() => ApplyRows(_presentation.Filter(_view?.SearchBox.Text ?? ""));
     private async Task UpdateRowsAsync()
@@ -307,7 +339,33 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         menu.Items.Add(item);
     }
 
-    private async void PanelKeyDown(object sender, KeyRoutedEventArgs e)
+    private async void HistoryListPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_view is null) return;
+        // Let the Pin button keep its native Enter/arrow behavior after Tab.
+        var focusedButton = _view.XamlRoot is not null &&
+            FocusManager.GetFocusedElement(_view.XamlRoot) is Button;
+        if (focusedButton && e.Key is VirtualKey.Up or VirtualKey.Down or VirtualKey.Enter) return;
+        if (e.Key is VirtualKey.Up or VirtualKey.Down)
+        {
+            var list = _view.HistoryList;
+            var index = HistoryListNavigation.NextIndex(list.Items.Count, list.SelectedIndex,
+                e.Key == VirtualKey.Down ? 1 : -1);
+            if (index < 0) return;
+            e.Handled = true;
+            list.SelectedIndex = index;
+            var item = (ListViewItem)list.Items[index];
+            list.ScrollIntoView(item);
+            if (!item.Focus(FocusState.Keyboard)) list.Focus(FocusState.Keyboard);
+            return;
+        }
+        await HandlePanelKeyAsync(e);
+    }
+
+    private async void PanelKeyDown(object sender, KeyRoutedEventArgs e) =>
+        await HandlePanelKeyAsync(e);
+
+    private async Task HandlePanelKeyAsync(KeyRoutedEventArgs e)
     {
         if (e.Key == VirtualKey.Escape)
         {
