@@ -1,0 +1,165 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+
+jobs:
+  validate-tag:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require vMAJOR.MINOR.PATCH
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag '$RELEASE_TAG' must use vMAJOR.MINOR.PATCH format." >&2
+            exit 1
+          fi
+
+  package:
+    name: Package ${{ matrix.platform }}
+    needs: validate-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Windows x64
+            os: windows-latest
+            package: windows
+          - platform: macOS Apple Silicon
+            os: macos-26
+            package: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore CSharpClipboard.sln
+
+      - name: Build
+        run: dotnet build CSharpClipboard.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test CSharpClipboard.sln -c Release --no-build --logger trx --results-directory TestResults
+
+      - name: Package Windows
+        if: matrix.package == 'windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          ./scripts/package-windows.ps1 -Version $version
+
+      - name: Package macOS and verify native bridge
+        if: matrix.package == 'macos'
+        run: bash scripts/package-macos.sh "${GITHUB_REF_NAME#v}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages-${{ matrix.package }}
+          path: |
+            artifacts/*.zip
+            artifacts/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/release-packages
+
+      - name: Verify packages and prepare release assets
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_ROOT: ${{ runner.temp }}/release-packages
+          ASSETS_ROOT: ${{ runner.temp }}/release-assets
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p "$ASSETS_ROOT"
+          : > "$ASSETS_ROOT/SHA256SUMS.txt"
+
+          for asset in \
+            "CSharpClipboard-${version}-win-x64.zip" \
+            "CSharpClipboard-${version}-osx-arm64-adhoc.zip"; do
+            matches=()
+            while IFS= read -r -d '' package_path; do
+              matches+=("$package_path")
+            done < <(find "$PACKAGE_ROOT" -type f -name "$asset" -print0)
+
+            if [[ ${#matches[@]} -ne 1 ]]; then
+              echo "Expected one packaged asset named '$asset', found ${#matches[@]}." >&2
+              exit 1
+            fi
+
+            package_path="${matches[0]}"
+            checksum_path="${package_path}.sha256"
+            if [[ ! -f "$checksum_path" ]]; then
+              echo "Missing checksum for '$asset'." >&2
+              exit 1
+            fi
+
+            read -r expected_hash checksum_asset < "$checksum_path"
+            if [[ "$checksum_asset" != "$asset" || ! "$expected_hash" =~ ^[[:xdigit:]]{64}$ ]]; then
+              echo "Invalid checksum file for '$asset'." >&2
+              exit 1
+            fi
+
+            actual_hash="$(sha256sum "$package_path" | awk '{print $1}')"
+            if [[ "${actual_hash,,}" != "${expected_hash,,}" ]]; then
+              echo "SHA-256 mismatch for '$asset'." >&2
+              exit 1
+            fi
+
+            cp "$package_path" "$ASSETS_ROOT/$asset"
+            cp "$checksum_path" "$ASSETS_ROOT/$asset.sha256"
+            printf '%s  %s\n' "$actual_hash" "$asset" >> "$ASSETS_ROOT/SHA256SUMS.txt"
+          done
+
+          notes_path="$RUNNER_TEMP/release-notes.md"
+          cat > "$notes_path" <<EOF
+          ## CSharpClipboard ${RELEASE_TAG}
+
+          ### Packages
+
+          - Windows 11 x64: CSharpClipboard-${version}-win-x64.zip
+          - macOS 26+ Apple Silicon: CSharpClipboard-${version}-osx-arm64-adhoc.zip
+          - SHA-256 checksums: SHA256SUMS.txt
+
+          The Windows package is not Authenticode-signed. The macOS package is ad-hoc signed, not Developer ID signed or notarized. If macOS blocks the first launch, approve it through the normal System Settings flow; do not disable Gatekeeper. Checksums verify file integrity, not publisher identity. CSharpClipboard opens this release page but does not install downloaded archives.
+          EOF
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "CSharpClipboard $RELEASE_TAG" --notes-file "$notes_path"
+            gh release upload "$RELEASE_TAG" "$ASSETS_ROOT"/* \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$ASSETS_ROOT"/* \
+              --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "CSharpClipboard $RELEASE_TAG" --notes-file "$notes_path"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -42,6 +42,12 @@ bash scripts/run-macos-dev-app.sh
 
 The scripts produce a stable `dev.dimonsmart.CSharpClipboard` app bundle with nested ad-hoc signatures. This is a development identity, not Developer ID publisher authentication/notarization. Use the normal System Settings approval flow for a downloaded app; the scripts never disable Gatekeeper. Re-grant Clipboard and Accessibility permissions to the new application as needed. `dotnet run` does not prove Finder/TCC behavior. Clipboard Always Allow and Accessibility are independent permissions.
 
-Windows Launch at Login uses per-user HKCU Run registration; disable it before deleting/moving a portable installation. macOS uses SMAppService and reports actual approval status. The GitHub workflow builds/tests both platforms and creates artifacts; uploading this code does not imply that CI has already passed.
+## Publishing
+
+From a clean checkout, run `publish-next-version.bat` on Windows or `pwsh -NoProfile -File ./publish-next-version.ps1` on macOS/Linux. The script fetches `origin`, updates `main`, and pushes the next annotated `vMAJOR.MINOR.PATCH` tag; the first release starts at `v1.0.0`. Pushing a tag runs the release workflow, which builds and tests on Windows and macOS, then publishes a stable GitHub Release with Windows x64 and macOS arm64 packages plus SHA-256 checksums.
+
+The Windows release ZIP is not Authenticode-signed. The macOS ZIP is ad-hoc signed and is not Developer ID signed or notarized. Checksums verify file integrity, not publisher identity; the app only opens the release page and does not install these packages.
+
+Windows Launch at Login uses per-user HKCU Run registration; disable it before deleting/moving a portable installation. macOS uses SMAppService and reports actual approval status. Pull requests and pushes to `main` run cross-platform build, test, and package CI. A version tag also runs the release workflow; pushing code does not imply that CI has already passed.
 
 See [acceptance matrix](docs/Acceptance.md), [evidence](docs/VerificationEvidence.md) and [dependency notices](docs/ThirdPartyNotices.md). `.idd/intent/` owns product behavior; `.idd/engineering/` owns implementation guardrails.

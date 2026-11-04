@@ -65,6 +65,7 @@ codesign -d -r- "$APP" 2> "$STAGE/designated-requirement.txt"
 "$APP/Contents/MacOS/CSharpClipboard" --version
 "$APP/Contents/MacOS/CSharpClipboard" --bridge-check
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
-shasum -a 256 "$ZIP" > "$ZIP.sha256"
+HASH="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+printf '%s  %s\n' "$HASH" "$(basename "$ZIP")" > "$ZIP.sha256"
 echo "$APP"
 echo "$ZIP"
