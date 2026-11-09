@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.System;
 using Windows.UI.Core;
 
@@ -46,13 +47,12 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     private HistoryInvocation<TSnapshot>? _invocation;
     private JsonSettingsStore? _settings;
     private AppPreferences _preferences = new();
-    private Window? _panel, _settingsWindow, _preview, _about;
+    private Window? _panel, _settingsWindow, _about;
     private HistoryView? _view;
     private int _searchVersion;
     private bool _refreshing;
     private bool _refreshPending;
     private bool _closing;
-    private bool _contextMenuOpen;
     private bool _initialHistoryFocusPending;
     private string _lastHistorySearchText = "";
     private int _disposed;
@@ -81,14 +81,10 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
             throw new InvalidDataException("Settings version is newer than the application.");
 
         var storage = await Task.Run(async () => await SqliteHistoryRepository.OpenAsync(DatabasePath,
-            new HistoryRepositoryOptions { MaximumUnpinnedItems = Math.Clamp(_preferences.Retention, 50, 2000) }));
+            new HistoryRepositoryOptions()));
         _history = storage;
         _maintenance = storage;
-        _capture = new ClipboardCaptureCoordinator(_clipboard, _history)
-        {
-            IsSourceExcluded = source => _preferences.ExcludedApplications.Contains(
-                source, _platform.UsesCommandKey ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase)
-        };
+        _capture = new ClipboardCaptureCoordinator(_clipboard, _history);
         _capture.StatusChanged += message => Post(() => { if (_view is not null) _view.StatusLabel.Text = message; });
         if (_preferences.CapturePaused) await _capture.PauseAsync(); else await _capture.StartAsync();
         _paste = new PasteService<TSnapshot>(_targets, this, _clipboard, _writer, _capture);
@@ -195,7 +191,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         _view = new HistoryView();
         _panel = NewWindow("Clipboard History", 640, 500, _view,
             () => { _ = RunAsync(CloseHistoryAsync); });
-        _view.KeyboardHints.Text = $"Enter Paste · {Modifier}+Enter Copy · {Modifier}+P Pin · {Modifier}+Y Preview · Escape Close";
+        _view.KeyboardHints.Text = $"Enter Paste · {Modifier}+Enter Copy · {Modifier}+P Pin · Escape Close";
         _view.ClearButton.Click += async (_, _) => await RunAsync(ClearRecentAsync);
         _view.SettingsButton.Click += (_, _) => ShowSettings();
         _view.HistoryList.ItemClick += (_, e) =>
@@ -227,7 +223,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
                 return;
             }
             // Deactivation may be caused by an intentional context menu or preview.
-            if (!_contextMenuOpen && !IsShown(_preview) && !_closing && IsShown(_panel))
+            if (!_closing && IsShown(_panel))
                 _ = RunAsync(CloseHistoryAsync);
         };
     }
@@ -307,7 +303,8 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
             var pinLabel = entry.PinnedAt is null ? "Pin" : "Unpin";
             var pin = new Button
             {
-                Content = new SymbolIcon(entry.PinnedAt is null ? Symbol.Pin : Symbol.UnPin)
+                Content = CreatePinIcon(entry.PinnedAt is not null),
+                Width = 32, Height = 32, Padding = new Thickness(5)
             };
             pin.Click += (_, _) => _ = RunAsync(() => PinAsync(entry));
             AutomationProperties.SetName(pin, pinLabel);
@@ -315,15 +312,6 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
             Grid.SetColumn(pin, 1);
             layout.Children.Add(pin);
             item.Content = layout;
-            var menu = new MenuFlyout();
-            MenuItem(menu, "Paste", () => SelectAsync(entry, false));
-            MenuItem(menu, "Copy Only", () => SelectAsync(entry, true));
-            MenuItem(menu, pinLabel, () => PinAsync(entry));
-            MenuItem(menu, "Preview", () => PreviewAsync(entry));
-            MenuItem(menu, "Delete", () => DeleteAsync(entry));
-            item.ContextFlyout = menu;
-            menu.Opening += (_, _) => _contextMenuOpen = true;
-            menu.Closed += (_, _) => _contextMenuOpen = false;
             list.Items.Add(item);
             if (entry.Id == selected) list.SelectedItem = item;
         }
@@ -332,11 +320,19 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         _view.EmptyMessage.Text = string.IsNullOrEmpty(_view.SearchBox.Text) ? "Copy text to start your history" : "No matches";
     }
 
-    private static void MenuItem(MenuFlyout menu, string caption, Func<Task> action)
+    // The pin is vector geometry, so it does not depend on macOS system fonts.
+    private static PathIcon CreatePinIcon(bool pinned)
     {
-        var item = new MenuFlyoutItem { Text = caption };
-        item.Click += async (_, _) => await action();
-        menu.Items.Add(item);
+        var figure = new PathFigure { StartPoint = new Windows.Foundation.Point(7, 3), IsClosed = true };
+        foreach (var (x, y) in new (double X, double Y)[]
+        {
+            (17, 3), (16, 6), (16, 12), (19, 15), (19, 17), (13, 17),
+            (12, 23), (11, 17), (5, 17), (5, 15), (8, 12), (8, 6)
+        })
+            figure.Segments.Add(new LineSegment { Point = new Windows.Foundation.Point(x, y) });
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        return new PathIcon { Data = geometry, Width = 20, Height = 20, Opacity = pinned ? 1 : 0.45 };
     }
 
     private async void HistoryListPreviewKeyDown(object sender, KeyRoutedEventArgs e)
@@ -380,9 +376,6 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         {
             VirtualKey.Enter => () => SelectAsync(entry, command),
             VirtualKey.P when command => () => PinAsync(entry),
-            VirtualKey.Y when command => () => PreviewAsync(entry),
-            VirtualKey.Delete when command => () => DeleteAsync(entry),
-            VirtualKey.Back when command && _platform.UsesCommandKey => () => DeleteAsync(entry),
             _ => null
         };
         if (action is not null) { e.Handled = true; await RunAsync(action); }
@@ -440,25 +433,6 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         }
         finally { _pinsInProgress.Remove(entry.Id); }
     }
-    private async Task DeleteAsync(HistoryEntry entry)
-    {
-        await Task.Run(async () => await _history!.DeleteAsync(entry.Id, default));
-        await RefreshAsync();
-    }
-
-    private Task PreviewAsync(HistoryEntry entry)
-    {
-        if (_preview is not null) HideWindow(_preview);
-        _preview = NewWindow("Full Preview — Read Only", 640, 480,
-            new TextBox
-            {
-                Text = entry.Text, IsReadOnly = true, AcceptsReturn = true,
-                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12)
-            });
-        ShowWindow(_preview);
-        return Task.CompletedTask;
-    }
-
     private async Task RefreshAsync()
     {
         if (_history is null || _closing) return;
@@ -540,6 +514,17 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
     }
     private static TextBlock Label(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap };
 
+    private string FormatShortcut(GlobalShortcut shortcut)
+    {
+        var parts = new List<string>();
+        if (shortcut.Modifiers.HasFlag(ShortcutModifiers.Control)) parts.Add("Ctrl");
+        if (shortcut.Modifiers.HasFlag(ShortcutModifiers.Alt)) parts.Add("Alt");
+        if (shortcut.Modifiers.HasFlag(ShortcutModifiers.Shift)) parts.Add("Shift");
+        if (shortcut.Modifiers.HasFlag(ShortcutModifiers.Meta)) parts.Add(_platform.UsesCommandKey ? "Cmd" : "Win");
+        parts.Add(shortcut.Key.ToUpperInvariant());
+        return string.Join("+", parts);
+    }
+
     private void ShowSettings()
     {
         if (_settingsWindow is not null)
@@ -547,6 +532,7 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
             ShowWindow(_settingsWindow);
             return;
         }
+
         var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(12) };
         var scroll = new ScrollViewer();
         var root = new Grid();
@@ -555,58 +541,46 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         root.Children.Add(header);
         Grid.SetRow(scroll, 1);
         root.Children.Add(scroll);
-        var window = NewWindow("CSharpClipboard Settings", 620, 650, root);
+        var window = NewWindow("CSharpClipboard Settings", 500, 360, root);
         _settingsWindow = window;
 
-        StackPanel NewPage() => new() { Padding = new Thickness(20), Spacing = 12 };
+        StackPanel NewPage() => new() { Padding = new Thickness(16), Spacing = 10 };
         var general = NewPage();
-        general.Children.Add(Label("Clipboard history stays on this device. Open History from the tray."));
-        general.Children.Add(Button("Open History", () =>
-        {
-            HideWindow(window);
-            RequestHistory();
-            return Task.CompletedTask;
-        }));
-        general.Children.Add(Button("Pause / Resume Capture", TogglePauseAsync));
-        general.Children.Add(Label("Retention: 50–2000 recent items. Pins are kept separately."));
-        var retention = new TextBox { Text = _preferences.Retention.ToString(), InputScope = new InputScope() };
-        AutomationProperties.SetName(retention, "Recent history limit");
-        general.Children.Add(retention);
-        var retentionStatus = Label("");
-        general.Children.Add(Button("Apply retention", async () =>
-        {
-            if (!int.TryParse(retention.Text, out var count) || count is < 50 or > 2000)
-            { retentionStatus.Text = "Enter a number from 50 to 2000."; return; }
-            await Task.Run(() => _maintenance!.SetRetentionAsync(count));
-            _preferences = _preferences with { Retention = count };
-            await SaveAsync();
-            retentionStatus.Text = "Retention saved.";
-        }));
-        general.Children.Add(retentionStatus);
         var login = new CheckBox { Content = "Launch at Login" };
         general.Children.Add(login);
-        var startup = Label(_platform.StartupDescription);
-        general.Children.Add(startup);
         _ = RunAsync(async () =>
         {
             login.IsChecked = await _platform.IsEnabledAsync(default);
-            startup.Text = _platform.StartupDescription;
+            ToolTipService.SetToolTip(login, _platform.StartupDescription);
         });
         login.Click += async (_, _) => await RunAsync(async () =>
         {
             await _platform.SetEnabledAsync(login.IsChecked == true, default);
             login.IsChecked = await _platform.IsEnabledAsync(default);
-            startup.Text = _platform.StartupDescription;
+            ToolTipService.SetToolTip(login, _platform.StartupDescription);
         });
-        general.Children.Add(Label("Open History shortcut (Ctrl/Alt/Shift on Windows; Cmd/Alt/Shift on macOS):"));
+
+        general.Children.Add(Label("Open History shortcut"));
         var shortcut = new TextBox
         {
-            IsReadOnly = true, PlaceholderText = "Focus and press a shortcut",
-            Text = _preferences.Shortcut is { } saved ? $"{saved.Modifiers}+{saved.Key}" : ""
+            IsReadOnly = true, PlaceholderText = "Press shortcut",
+            Text = _preferences.Shortcut is { } saved ? FormatShortcut(saved) : "",
+            Width = 315
         };
         AutomationProperties.SetName(shortcut, "Record Open History shortcut");
-        general.Children.Add(shortcut);
+        var shortcutRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        shortcutRow.Children.Add(shortcut);
+        shortcutRow.Children.Add(Button("Clear", async () =>
+        {
+            await _platform.UnregisterAsync(default);
+            _preferences = _preferences with { Shortcut = null };
+            await SaveAsync();
+            shortcut.Text = "";
+        }));
+        general.Children.Add(shortcutRow);
         var shortcutFeedback = Label("");
+        shortcutFeedback.FontSize = 12;
+        shortcutFeedback.Visibility = Visibility.Collapsed;
         general.Children.Add(shortcutFeedback);
         shortcut.KeyDown += async (_, e) =>
         {
@@ -620,102 +594,69 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
             if (Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows)) modifiers |= ShortcutModifiers.Meta;
             var candidate = new GlobalShortcut(key, modifiers);
             try { await _platform.RegisterAsync(candidate, default); }
-            catch { shortcutFeedback.Text = "Shortcut unavailable or reserved. Previous shortcut retained."; return; }
-            _preferences = _preferences with { Shortcut = candidate };
-            shortcut.Text = $"{candidate.Modifiers}+{candidate.Key}";
-            try { await SaveAsync(); shortcutFeedback.Text = "Shortcut saved."; }
-            catch { shortcutFeedback.Text = "Shortcut active; settings could not be saved."; }
-        };
-        general.Children.Add(Button("Remove shortcut", async () =>
-        {
-            await _platform.UnregisterAsync(default);
-            _preferences = _preferences with { Shortcut = null };
-            await SaveAsync();
-            shortcut.Text = "";
-        }));
-
-        var privacy = NewPage();
-        var permissions = Label(_platform.PermissionDescription);
-        privacy.Children.Add(permissions);
-        privacy.Children.Add(Button("Refresh permission status", async () =>
-        {
-            await _platform.GetClipboardAccessAsync(default);
-            permissions.Text = _platform.PermissionDescription;
-        }));
-        if (_platform.UsesCommandKey)
-        {
-            privacy.Children.Add(Button("Request Clipboard Access Once", () =>
-            { _platform.RequestClipboardAccess(); return Task.CompletedTask; }));
-            privacy.Children.Add(Label("If the system link fails, use System Settings → Privacy & Security → Clipboard → CSharpClipboard → Always Allow."));
-            privacy.Children.Add(Button("Open Clipboard Privacy Settings", () =>
-            { _platform.OpenClipboardSettings(); return Task.CompletedTask; }));
-            privacy.Children.Add(Button("Enable Accessibility for Automatic Paste…", () =>
-            { _platform.RequestPasteAccess(); return Task.CompletedTask; }));
-        }
-        privacy.Children.Add(Label("Ignore NEW copies from these exact app identifiers (one per line). Attribution is best-effort."));
-        var exclusions = new TextBox
-        {
-            Text = string.Join(Environment.NewLine, _preferences.ExcludedApplications),
-            AcceptsReturn = true, MinHeight = 130,
-            PlaceholderText = _platform.UsesCommandKey ? "com.apple.Safari" : @"C:\Program Files\Example\example.exe"
-        };
-        privacy.Children.Add(exclusions);
-        var exclusionStatus = Label("");
-        privacy.Children.Add(exclusionStatus);
-        privacy.Children.Add(Button("Save exclusions", async () =>
-        {
-            var ids = (exclusions.Text ?? "").Split(['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().ToArray();
-            if (ids.Any(id => !_platform.IsValidApplicationIdentifier(id)))
-            { exclusionStatus.Text = "Invalid application identifier."; return; }
-            _preferences = _preferences with { ExcludedApplications = ids };
-            await SaveAsync();
-            exclusionStatus.Text = "Exclusions saved.";
-        }));
-
-        var data = NewPage();
-        data.Children.Add(Label("History is stored unencrypted on this device."));
-        data.Children.Add(new TextBox { Text = DatabasePath, IsReadOnly = true });
-        data.Children.Add(Button("Clear Recent (keep pins)", ClearRecentAsync));
-        data.Children.Add(Button("Clear All…", async () =>
-        {
-            if (await ConfirmAsync(window))
+            catch
             {
-                await Task.Run(async () => await _history!.ClearAllAsync(default));
-                await Task.Run(() => _maintenance!.MaintainAsync());
-                await RefreshAsync();
+                shortcutFeedback.Text = "Shortcut unavailable. Previous shortcut retained.";
+                shortcutFeedback.Visibility = Visibility.Visible;
+                return;
             }
-        }));
-        data.Children.Add(Label("Copy events can occur faster than the OS exposes them; not every copy is guaranteed to be observed."));
+            _preferences = _preferences with { Shortcut = candidate };
+            shortcut.Text = FormatShortcut(candidate);
+            shortcutFeedback.Visibility = Visibility.Collapsed;
+            try { await SaveAsync(); }
+            catch
+            {
+                shortcutFeedback.Text = "Shortcut active, but could not save it.";
+                shortcutFeedback.Visibility = Visibility.Visible;
+            }
+        };
 
-        void Section(string name, StackPanel page)
-        {
+        var path = Label("History: " + DatabasePath);
+        path.FontSize = 11;
+        path.Opacity = 0.65;
+        general.Children.Add(path);
+
+        void Section(string name, StackPanel page) =>
             header.Children.Add(Button(name, () =>
             {
                 scroll.Content = page;
                 return Task.CompletedTask;
             }));
-        }
+
         Section("General", general);
-        Section("Privacy", privacy);
-        Section("Data", data);
+        if (_platform.UsesCommandKey)
+        {
+            var permissionsPage = NewPage();
+            var status = Label("");
+            status.FontSize = 12;
+            permissionsPage.Children.Add(status);
+            var help = Label("Set Clipboard to Always Allow and enable Accessibility in macOS.");
+            help.FontSize = 12;
+            permissionsPage.Children.Add(help);
+
+            async Task RefreshPermissionsAsync()
+            {
+                await _platform.GetClipboardAccessAsync(default);
+                status.Text = _platform.PermissionDescription;
+            }
+
+            permissionsPage.Children.Add(Button("Request permissions…", async () =>
+            {
+                _platform.RequestClipboardAccess();
+                _platform.RequestPasteAccess();
+                _platform.OpenClipboardSettings();
+                await RefreshPermissionsAsync();
+            }));
+            Section("Permissions", permissionsPage);
+            window.Activated += (_, args) =>
+            {
+                if (args.WindowActivationState != CoreWindowActivationState.Deactivated)
+                    _ = RunAsync(RefreshPermissionsAsync);
+            };
+        }
+
         scroll.Content = general;
         ShowWindow(window);
-    }
-
-    private static async Task<bool> ConfirmAsync(Window owner)
-    {
-        if (owner.Content is not FrameworkElement root || root.XamlRoot is null) return false;
-        var dialog = new ContentDialog
-        {
-            XamlRoot = root.XamlRoot,
-            Title = "Delete all clipboard history?",
-            Content = "Delete every entry, including pins? This cannot be undone.",
-            PrimaryButtonText = "Delete all history",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close
-        };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
     private void ShowAbout()
