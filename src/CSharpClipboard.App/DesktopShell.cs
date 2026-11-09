@@ -236,14 +236,22 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         {
             if (_closing) return;
             args.Cancel = true;
-            try
+            // Defer the hide until the native close callback has completed.
+            if (!_dispatcher.TryEnqueue(() =>
             {
-                if (onHide is not null) onHide();
-                else HideWindow(window);
-            }
-            catch (Exception error)
+                if (_closing) return;
+                try
+                {
+                    if (onHide is not null) onHide();
+                    else HideWindow(window);
+                }
+                catch (Exception error)
+                {
+                    System.Diagnostics.Trace.TraceError("CSharpClipboard window hide failed: " + error);
+                }
+            }))
             {
-                System.Diagnostics.Trace.TraceError("CSharpClipboard window hide failed: " + error);
+                System.Diagnostics.Trace.TraceError("CSharpClipboard could not queue a window hide after close.");
             }
         };
         _windows.Add(window);
@@ -584,14 +592,20 @@ internal sealed class DesktopShell<TSnapshot> : IDesktopShell, IHistoryPanelPort
         general.Children.Add(shortcutFeedback);
         shortcut.KeyDown += async (_, e) =>
         {
-            e.Handled = true;
             var key = e.Key.ToString();
             if (key.Length != 1 || !char.IsAsciiLetterOrDigit(key[0])) return;
+            var commandPressed = Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows);
+            // Cmd+W is the standard macOS Close Window command. Let AppKit route
+            // it to the window even while the shortcut recorder has focus.
+            if (_platform.UsesCommandKey && commandPressed && key.Equals("W", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            e.Handled = true;
             var modifiers = ShortcutModifiers.None;
             if (Down(VirtualKey.Control)) modifiers |= ShortcutModifiers.Control;
             if (Down(VirtualKey.Menu)) modifiers |= ShortcutModifiers.Alt;
             if (Down(VirtualKey.Shift)) modifiers |= ShortcutModifiers.Shift;
-            if (Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows)) modifiers |= ShortcutModifiers.Meta;
+            if (commandPressed) modifiers |= ShortcutModifiers.Meta;
             var candidate = new GlobalShortcut(key, modifiers);
             try { await _platform.RegisterAsync(candidate, default); }
             catch

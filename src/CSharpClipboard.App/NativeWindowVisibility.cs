@@ -34,9 +34,14 @@ internal static partial class NativeWindowVisibility
         {
             var native = Uno.UI.Xaml.WindowHelper.GetNativeWindow(window)
                 ?? throw new InvalidOperationException("Uno window has no AppKit peer.");
-            var property = native.GetType().GetProperty("Handle", BindingFlags.Public | BindingFlags.Instance)
-                ?? throw new InvalidOperationException("AppKit window Handle unavailable.");
-            if (property.GetValue(native) is not IntPtr handle || handle == IntPtr.Zero)
+            // Depending on the Uno window implementation, GetNativeWindow returns
+            // either the native peer itself or a wrapper around it.
+            var nativeWindow = native.GetType()
+                .GetProperty("NativeWindow", BindingFlags.Public | BindingFlags.Instance)?.GetValue(native)
+                ?? native;
+            var handleProperty = nativeWindow.GetType().GetProperty("Handle",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (handleProperty?.GetValue(nativeWindow) is not IntPtr handle || handle == IntPtr.Zero)
                 throw new InvalidOperationException("AppKit window Handle invalid.");
             ObjcMsgSend(handle, SelRegisterName("orderOut:"), IntPtr.Zero);
         }
