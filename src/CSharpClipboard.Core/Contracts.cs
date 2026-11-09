@@ -181,11 +181,9 @@ public interface IAppUpdater
 public sealed record AppPreferences
 {
     public int Version { get; init; } = 1;
-    public int Retention { get; init; } = 500;
     public bool CapturePaused { get; init; }
     public bool Onboarded { get; init; }
     public GlobalShortcut? Shortcut { get; init; }
-    public string[] ExcludedApplications { get; init; } = [];
 }
 
 public interface IDesktopPlatformServices : IGlobalShortcutPort, IStartupRegistration, IPermissionStatusPort, IPlatformIdentity, IDisposable
