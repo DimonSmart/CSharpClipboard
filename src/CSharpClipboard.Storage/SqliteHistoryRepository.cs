@@ -7,7 +7,7 @@ namespace CSharpClipboard.Storage;
 
 public sealed record HistoryRepositoryOptions
 {
-    public int MaximumUnpinnedItems { get; init; } = 500;
+    public int MaximumUnpinnedItems { get; init; } = int.MaxValue;
 
     public TimeSpan BusyTimeout { get; init; } = TimeSpan.FromSeconds(5);
 }
@@ -427,9 +427,9 @@ public sealed class SqliteHistoryRepository : IHistoryRepository, IHistoryMainte
 
     private static void ValidateOptions(HistoryRepositoryOptions options)
     {
-        if (options.MaximumUnpinnedItems is < 50 or > 2000)
+        if (options.MaximumUnpinnedItems != int.MaxValue && options.MaximumUnpinnedItems is < 50 or > 2000)
         {
-            throw new ArgumentOutOfRangeException(nameof(options.MaximumUnpinnedItems), "The unpinned history limit must be from 50 through 2000.");
+            throw new ArgumentOutOfRangeException(nameof(options.MaximumUnpinnedItems), "The unpinned history limit must be from 50 through 2000 or unlimited.");
         }
 
         if (options.BusyTimeout <= TimeSpan.Zero || options.BusyTimeout > TimeSpan.FromMinutes(1))

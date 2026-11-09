@@ -14,10 +14,11 @@ public sealed class SettingsAndMaintenanceTests
         try
         {
             var store = new JsonSettingsStore(path);
-            await store.SetAsync("preferences", new AppPreferences { Retention = 150, Shortcut = new("H", ShortcutModifiers.Control | ShortcutModifiers.Shift) }, default);
+            await store.SetAsync("preferences", new AppPreferences { Shortcut = new("H", ShortcutModifiers.Control | ShortcutModifiers.Shift) }, default);
             await store.SetAsync("other", 42, default);
             var restarted = new JsonSettingsStore(path);
-            Assert.Equal(150, (await restarted.GetAsync<AppPreferences>("preferences", default))!.Retention);
+            Assert.Equal(new GlobalShortcut("H", ShortcutModifiers.Control | ShortcutModifiers.Shift),
+                (await restarted.GetAsync<AppPreferences>("preferences", default))!.Shortcut);
             Assert.Equal(42, await restarted.GetAsync<int>("other", default));
             await File.WriteAllTextAsync(path, "corrupt");
             await Assert.ThrowsAsync<System.Text.Json.JsonException>(() => restarted.SetAsync("other", 99, default).AsTask());

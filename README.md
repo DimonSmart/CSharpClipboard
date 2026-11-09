@@ -6,13 +6,13 @@ Extract the Windows portable ZIP and run `CSharpClipboard.App.exe`. It starts in
 
 Left click opens Clipboard History; right click offers History, Pause/Resume Capture, Settings, Clear Recent, About and Quit. Closing a window keeps capture running. A second launch opens History in the existing instance.
 
-## History and privacy
+## History and permissions
 
-Search, pin, preview, delete and clear local text history. Clear Recent preserves pins; Clear All asks for confirmation. Retention is configurable from 50 to 2000 recent entries, initially 500. History remains in a private user directory and is not encrypted. Pause performs no content reads; Resume establishes a new baseline without importing the previous clipboard item. Application exclusions are best-effort: exact full executable paths on Windows, exact bundle IDs on macOS.
+Search and pin plain-text history. **Clear** removes unpinned entries and preserves pins. History does not have an automatic entry-count limit. History remains in a private user directory and is not encrypted. Clicking a history row requests guarded Paste. Ctrl+Enter (Cmd+Enter on Mac) uses Copy Only. Ctrl/Cmd+P toggles the selected pin; Escape closes History. No per-entry context menu, Preview, Delete or Data settings are shown.
 
-Enter/row click requests guarded Paste. Ctrl+Enter (Cmd+Enter on Mac) is Copy Only. Ctrl/Cmd+P pins, Ctrl/Cmd+Y previews, Ctrl+Delete on Windows / Cmd+Backspace on Mac deletes, Escape closes without action. Open History hotkey is unassigned initially and recorded in Settings.
+Settings has Launch at Login, a compact Open History shortcut recorder and a small history-path label. macOS also has Permissions, with one button to request Clipboard and Accessibility access and open the system panel. Clipboard **Always Allow** is needed for automatic capture; Accessibility independently allows guarded paste. Windows does not need a Clipboard permission screen. Use the tray/status menu to pause or resume capture.
 
-Paste checks the original process, window, field, permissions and clipboard revision before sending one normal paste shortcut. Unsupported, protected, elevated/remote or changed targets use Copy Only. The clipboard is never restored to an old value; a later external change cancels Paste. `Shortcut sent` is not a guarantee the target accepted insertion. Embedded NUL is retained in storage/private exact-text data; ordinary Windows Unicode-text consumers naturally stop at the first NUL.
+Paste checks the original process, window, field, permissions and clipboard revision before sending one normal paste shortcut. Unsupported, protected, elevated/remote or changed targets use Copy Only. A later external clipboard change cancels Paste. `Shortcut sent` is not a guarantee the target accepted insertion. Embedded NUL is retained in storage/private exact-text data; ordinary Windows Unicode-text consumers naturally stop at the first NUL.
 
 About performs a user-initiated stable GitHub Release check and opens the release page. It does not install downloaded archives. There are no automatic update checks or telemetry.
 

@@ -118,6 +118,20 @@ public sealed class SqliteHistoryRepositoryTests
     }
 
     [Fact]
+    public async Task Default_history_does_not_discard_entries_after_500_copies()
+    {
+        await using var database = new TemporaryDatabase();
+        await using var repository = await OpenAsync(database.Path, new TestClock());
+
+        for (var index = 0; index < 501; index++)
+            await repository.UpsertCaptureAsync(new HistoryCapture($"entry-{index}", null), CancellationToken.None);
+
+        var entries = await repository.GetEntriesAsync(null, CancellationToken.None);
+        Assert.Equal(501, entries.Count);
+        Assert.Contains(entries, entry => entry.Text == "entry-0");
+    }
+
+    [Fact]
     public async Task Retention_keeps_pins_and_unpin_applies_the_limit()
     {
         await using var database = new TemporaryDatabase();
