@@ -61,7 +61,7 @@ public sealed class MacOSIntegration : IClipboardPort, IClipboardWritePort, IPas
     public string ApplicationIdentifier => "dev.dimonsmart.CSharpClipboard";
     public event EventHandler<ClipboardSignal>? Changed;
     public event Action? HistoryRequested;
-    public string PermissionDescription => $"Clipboard: {_permission}. Accessibility: {(_accessibility ? "Allowed" : "Not allowed")}. Only Always Allow enables automatic capture. Accessibility independently enables guarded paste. Default means the app may not appear in System Settings until Request Clipboard Access Once is used. Sources are best-effort.";
+    public string PermissionDescription => $"Clipboard: {_permission} · Accessibility: {(_accessibility ? "Allowed" : "Not allowed")}";
     public string StartupDescription => $"Launch at Login: {_startup}. Approval may be required in System Settings → General → Login Items. Run the installed .app bundle.";
     private async Task TickAsync()
     {
